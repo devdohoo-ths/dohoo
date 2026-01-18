@@ -1,0 +1,184 @@
+export interface Database {
+  public: {
+    Tables: {
+      messages: {
+        Row: {
+          id: string;
+          chat_id: string;
+          content: string | null;
+          created_at: string | null;
+          is_from_me: boolean | null;
+          is_important: boolean | null;
+          is_internal: boolean | null;
+          media_url: string | null;
+          message_id: string | null;
+          message_type: string | null;
+          metadata: any | null;
+          organization_id: string | null;
+          reply_to: string | null;
+          sender_id: string | null;
+          sender_name: string | null;
+          status: string | null;
+          updated_at: string | null;
+          whatsapp_message_id: string | null;
+          reactions: { [key: string]: string[] } | null;
+        };
+        Insert: {
+          id?: string;
+          chat_id: string;
+          content?: string | null;
+          created_at?: string | null;
+          is_from_me?: boolean | null;
+          is_important?: boolean | null;
+          is_internal?: boolean | null;
+          media_url?: string | null;
+          message_id?: string | null;
+          message_type?: string | null;
+          metadata?: any | null;
+          organization_id?: string | null;
+          reply_to?: string | null;
+          sender_id?: string | null;
+          sender_name?: string | null;
+          status?: string | null;
+          updated_at?: string | null;
+          whatsapp_message_id?: string | null;
+          reactions?: { [key: string]: string[] } | null;
+        };
+        Update: {
+          id?: string;
+          chat_id?: string;
+          content?: string | null;
+          created_at?: string | null;
+          is_from_me?: boolean | null;
+          is_important?: boolean | null;
+          is_internal?: boolean | null;
+          media_url?: string | null;
+          message_id?: string | null;
+          message_type?: string | null;
+          metadata?: any | null;
+          organization_id?: string | null;
+          reply_to?: string | null;
+          sender_id?: string | null;
+          sender_name?: string | null;
+          status?: string | null;
+          updated_at?: string | null;
+          whatsapp_message_id?: string | null;
+          reactions?: { [key: string]: string[] } | null;
+        };
+      };
+      chats: {
+        Row: {
+          id: string;
+          name: string;
+          avatar_url: string | null;
+          platform: string;
+          status: string | null;
+          priority: string | null;
+          unread_count: number | null;
+          last_message_at: string | null;
+          created_at: string | null;
+          updated_at: string | null;
+          assigned_agent_id: string | null;
+          organization_id: string | null;
+          whatsapp_jid: string | null;
+          remote_jid: string | null;
+          is_group: boolean | null;
+          department: string | null;
+          participants: any | null;
+          metadata: any | null;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          avatar_url?: string | null;
+          platform: string;
+          status?: string | null;
+          priority?: string | null;
+          unread_count?: number | null;
+          last_message_at?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+          assigned_agent_id?: string | null;
+          organization_id?: string | null;
+          whatsapp_jid?: string | null;
+          remote_jid?: string | null;
+          is_group?: boolean | null;
+          department?: string | null;
+          participants?: any | null;
+          metadata?: any | null;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          avatar_url?: string | null;
+          platform?: string;
+          status?: string | null;
+          priority?: string | null;
+          unread_count?: number | null;
+          last_message_at?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+          assigned_agent_id?: string | null;
+          organization_id?: string | null;
+          whatsapp_jid?: string | null;
+          remote_jid?: string | null;
+          is_group?: boolean | null;
+          department?: string | null;
+          participants?: any | null;
+          metadata?: any | null;
+        };
+      };
+      profiles: {
+        Row: {
+          id: string;
+          name: string | null;
+          email: string | null;
+          avatar_url: string | null;
+          created_at: string | null;
+          updated_at: string | null;
+          organization_id: string | null;
+          department: string | null;
+          is_online: boolean | null;
+          permissions: any | null;
+          role: string | null;
+          user_role: string | null;
+          last_seen: string | null;
+        };
+        Insert: {
+          id: string;
+          name?: string | null;
+          email?: string | null;
+          avatar_url?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+          organization_id?: string | null;
+          department?: string | null;
+          is_online?: boolean | null;
+          permissions?: any | null;
+          role?: string | null;
+          user_role?: string | null;
+          last_seen?: string | null;
+        };
+        Update: {
+          id?: string;
+          name?: string | null;
+          email?: string | null;
+          avatar_url?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+          organization_id?: string | null;
+          department?: string | null;
+          is_online?: boolean | null;
+          permissions?: any | null;
+          role?: string | null;
+          user_role?: string | null;
+          last_seen?: string | null;
+        };
+      };
+    };
+  };
+}
+
+export type Tables<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Row'];
+export type TablesInsert<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Insert'];
+export type TablesUpdate<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Update']; 

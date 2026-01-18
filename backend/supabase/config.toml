@@ -1,0 +1,3 @@
+
+[functions.ai-chat-playground]
+  verify_jwt = true
