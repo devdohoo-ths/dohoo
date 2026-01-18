@@ -101,20 +101,94 @@ npm install
 
    > ⚠️ **IMPORTANTE:** APIs de IA (`OPENAI`, `ELEVEN_LABS`, etc.) devem ser configuradas **APENAS no backend**, não no frontend!
 
-### 3. Configurar Supabase
+### 3. Configurar Banco de Dados (Supabase)
 
-1. Crie um projeto no [Supabase](https://supabase.com)
-2. Vá em **Settings > API** e copie:
-   - **Project URL** → `SUPABASE_URL`
-   - **anon public** key → `SUPABASE_ANON_KEY`
-   - **service_role** key → `SUPABASE_SERVICE_ROLE_KEY`
+1. **Crie um projeto no [Supabase](https://supabase.com)**
+   - Acesse https://app.supabase.com
+   - Crie um novo projeto (se ainda não tiver)
 
-3. Execute as migrações do banco de dados:
+2. **Copie as credenciais do Supabase:**
+   - Vá em **Settings > API**
+   - Copie os seguintes valores:
+     - **Project URL** → `SUPABASE_URL` (ex: `https://xxxxx.supabase.co`)
+     - **anon public** key → `SUPABASE_ANON_KEY`
+     - **service_role** key → `SUPABASE_SERVICE_ROLE_KEY` ⚠️ **MANTENHA SEGURO!**
+
+3. **Configure as variáveis no `.env` do backend** (se ainda não fez):
+   ```env
+   SUPABASE_URL=https://seu-projeto.supabase.co
+   SUPABASE_ANON_KEY=sua-anon-key
+   SUPABASE_SERVICE_ROLE_KEY=sua-service-role-key
+   ```
+
+4. **Execute as migrações do banco de dados:**
+
+   Você tem **3 opções** para criar o banco de dados:
+
+   #### Opção A: Via Supabase Dashboard (Recomendado para primeira vez)
+
+   1. Acesse seu projeto no [Supabase Dashboard](https://app.supabase.com)
+   2. Vá em **SQL Editor** (menu lateral)
+   3. Clique em **New query**
+   4. Execute cada arquivo SQL da pasta `backend/supabase/migrations/` **em ordem alfabética**:
+      - Comece por: `20240318000000_ai_settings.sql`
+      - Continue na ordem: `20241219000001-add-poc-system.sql`, etc.
+      - Execute todos os arquivos SQL (aproximadamente 66 arquivos)
+   5. Para cada arquivo:
+      - Abra o arquivo `.sql` em um editor de texto
+      - Copie todo o conteúdo
+      - Cole no SQL Editor do Supabase
+      - Clique em **Run** (ou `Ctrl+Enter`)
+
+   > ⚠️ **Importante:** Execute as migrações na ordem dos nomes dos arquivos para evitar erros de dependências. As primeiras migrações criam as tabelas base (`organizations`, `profiles`, `chats`, `messages`).
+
+   #### Opção B: Via API do Backend (Automatizado)
+
+   1. Certifique-se de que o backend está configurado (`.env` com credenciais do Supabase)
+   2. Inicie o backend:
+      ```bash
+      cd backend
+      npm run dev
+      ```
+   3. Em outro terminal, execute o setup completo:
+      ```bash
+      curl -X POST http://localhost:3001/api/database/setup-complete \
+        -H "Content-Type: application/json" \
+        -d '{
+          "connection": {
+            "type": "supabase",
+            "url": "SUA_SUPABASE_URL",
+            "service_role_key": "SUA_SERVICE_ROLE_KEY"
+          }
+        }'
+      ```
+      *(Substitua `SUA_SUPABASE_URL` e `SUA_SERVICE_ROLE_KEY` pelos valores do seu `.env`)*
+
+   Ou use uma ferramenta como **Postman** ou **Insomnia** para fazer a requisição POST:
+   - **URL:** `http://localhost:3001/api/database/setup-complete`
+   - **Method:** `POST`
+   - **Headers:** `Content-Type: application/json`
+   - **Body (JSON):**
+     ```json
+     {
+       "connection": {
+         "type": "supabase",
+         "url": "https://seu-projeto.supabase.co",
+         "service_role_key": "sua-service-role-key"
+       }
+     }
+     ```
+
+   #### Opção C: Via Script Node.js (Parcial)
+
    ```bash
    cd backend
-   # As migrações estão em: backend/supabase/migrations/
-   # Execute conforme necessário através do Supabase Dashboard ou via script
+   node scripts/apply-migrations.js
    ```
+
+   > ⚠️ **Nota:** Atualmente o script `apply-migrations.js` executa apenas migrações específicas. Para executar todas as migrações, use a **Opção A** ou **Opção B**.
+
+   **Após executar as migrações**, seu banco de dados estará pronto! ✅
 
 ---
 
@@ -161,7 +235,8 @@ dohoo/
 │   ├── routes/             # Rotas da API
 │   ├── services/           # Serviços de negócio
 │   ├── middleware/         # Middlewares (auth, etc.)
-│   ├── migrations/         # Migrações SQL
+│   ├── supabase/           # Configurações e migrações Supabase
+│   │   └── migrations/     # Migrações SQL (execute todas para criar o banco)
 │   ├── lib/                # Bibliotecas e configurações
 │   ├── scripts/            # Scripts auxiliares
 │   ├── server.js           # Servidor principal
@@ -254,9 +329,26 @@ dohoo/
 - Verifique CORS no backend (variável `CORS_ALLOWED_ORIGINS`)
 
 ### Erro ao executar migrações
-- Confirme que as credenciais do Supabase estão corretas
+
+**Erro: "relation already exists" ou "column already exists"**
+- Esses erros são normais quando a migração já foi executada anteriormente
+- Continue executando as próximas migrações
+- As migrações usam `CREATE TABLE IF NOT EXISTS` e `ADD COLUMN IF NOT EXISTS` quando possível
+
+**Erro: "foreign key constraint" ou dependências**
+- Certifique-se de executar as migrações em ordem alfabética
+- As primeiras migrações criam as tabelas base necessárias
+- Se encontrar erros, verifique se todas as migrações anteriores foram executadas
+
+**Erro de conexão ao usar a API (`/api/database/setup-complete`)**
+- Confirme que as credenciais do Supabase estão corretas no `.env`
 - Verifique se o projeto Supabase está ativo
-- Consulte os logs para mais detalhes
+- Confirme que o `SUPABASE_SERVICE_ROLE_KEY` está correto (não use a `ANON_KEY`)
+- Consulte os logs do backend para mais detalhes
+
+**Como verificar se as migrações foram executadas:**
+- No Supabase Dashboard, vá em **Table Editor**
+- Verifique se as tabelas principais existem: `organizations`, `profiles`, `chats`, `messages`
 
 ---
 
@@ -316,12 +408,14 @@ Para suporte, dúvidas ou problemas:
 
 Após a instalação:
 
-1. ✅ Configure o Supabase e execute as migrações
-2. ✅ Configure as variáveis de ambiente
-3. ✅ Inicie o backend e frontend
-4. ✅ Acesse o sistema no navegador
-5. ✅ Crie seu primeiro usuário e organização
-6. ✅ Configure conexões WhatsApp (se aplicável)
+1. ✅ Configure o projeto no Supabase e copie as credenciais
+2. ✅ Configure as variáveis de ambiente no `.env` do backend e frontend
+3. ✅ **Execute as migrações do banco de dados** (veja seção [Configurar Banco de Dados](#3-configurar-banco-de-dados-supabase))
+4. ✅ Inicie o backend (`npm run dev` na pasta `backend`)
+5. ✅ Inicie o frontend (`npm run dev` na pasta `frontend`)
+6. ✅ Acesse o sistema no navegador (geralmente `http://localhost:8080`)
+7. ✅ Crie seu primeiro usuário e organização
+8. ✅ Configure conexões WhatsApp (se aplicável)
 
 **Boa sorte com o projeto! 🚀**
 
