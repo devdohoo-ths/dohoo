@@ -357,9 +357,9 @@ const ReportDetailedConversations: React.FC = () => {
       // 🎯 NOVO: Buscar dados dos usuários via API (mesma usada em /accounts)
       logger.debug('[Relatório Detalhado] Buscando dados dos usuários via API');
       
-      const headers = await getAuthHeaders();
+      const userHeaders = await getAuthHeaders();
       const usersResponse = await fetch(`${apiBase}/api/users?organization_id=${organization.id}`, {
-        headers
+        headers: userHeaders
       });
 
       let userMap = new Map();
@@ -747,7 +747,7 @@ const ReportDetailedConversations: React.FC = () => {
       logger.debug(`[Debug] Buscando dados em batch para ${conversationIds.length} chats únicos (${data.conversations.length} conversas unificadas)`);
       
       // 1. Buscar todas as mensagens de uma vez para todos os chats via API
-      const messagesParams = new URLSearchParams({
+      const batchMessagesParams = new URLSearchParams({
         organization_id: organization.id,
         dateStart: startDate.toISOString().split('T')[0],
         dateEnd: endDate.toISOString().split('T')[0],
@@ -756,17 +756,17 @@ const ReportDetailedConversations: React.FC = () => {
       });
       
       if (filters.userId) {
-        messagesParams.append('agents', filters.userId);
+        batchMessagesParams.append('agents', filters.userId);
         logger.debug(`[Debug] Aplicando filtro de usuário ${filters.userId} para todas as mensagens`);
       }
       
       // 2. Buscar todos os chats de uma vez via API
       const chatIdsParam = conversationIds.join(',');
-      const headers = await getAuthHeaders();
+      const batchHeaders = await getAuthHeaders();
       
       const [allMessagesResponse, allChatsResponse] = await Promise.all([
-        fetch(`${apiBase}/api/messages?${messagesParams}`, { headers }),
-        fetch(`${apiBase}/api/chat-operations/chats?ids=${chatIdsParam}&organization_id=${organization.id}`, { headers })
+        fetch(`${apiBase}/api/messages?${batchMessagesParams}`, { headers: batchHeaders }),
+        fetch(`${apiBase}/api/chat-operations/chats?ids=${chatIdsParam}&organization_id=${organization.id}`, { headers: batchHeaders })
       ]);
       
       let allMessagesData: any[] = [];

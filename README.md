@@ -39,10 +39,41 @@ cd dohoo
 
 ### 2. Instale as dependências do Backend
 
+**Opção A: Instalação Normal (se funcionar)**
 ```bash
 cd backend
 npm install
 ```
+
+**Opção B: Instalação Limpa (recomendado para novas instalações)**
+
+**Windows:**
+```bash
+cd backend
+install-dependencies.bat
+```
+
+**Linux/Mac:**
+```bash
+cd backend
+chmod +x install-dependencies.sh
+./install-dependencies.sh
+```
+
+**Opção C: Instalação Manual Limpa**
+```bash
+cd backend
+# Limpar cache e dependências antigas
+npm cache clean --force
+rm -rf node_modules package-lock.json  # Linux/Mac
+# ou
+rmdir /s /q node_modules & del package-lock.json  # Windows
+
+# Reinstalar
+npm install
+```
+
+> ⚠️ **Se encontrar erros de módulos não encontrados** (como `@supabase/supabase-js`), use a **Opção B** ou **C** para fazer uma instalação limpa.
 
 ### 3. Instale as dependências do Frontend
 
@@ -327,6 +358,40 @@ dohoo/
 - Verifique se `VITE_API_BASE` está correto no `.env` do frontend
 - Confirme que o backend está rodando na porta configurada
 - Verifique CORS no backend (variável `CORS_ALLOWED_ORIGINS`)
+
+### Erro: "Cannot find module" ou módulos não encontrados
+
+**Erro comum:** `Cannot find module '@supabase/supabase-js'` ou similar após `npm install`
+
+**Solução:**
+
+1. **Limpe e reinstale as dependências:**
+   ```bash
+   cd backend
+   npm cache clean --force
+   rm -rf node_modules package-lock.json  # Linux/Mac
+   # ou no Windows:
+   # rmdir /s /q node_modules
+   # del package-lock.json
+   npm install
+   ```
+
+2. **Ou use o script de instalação limpa:**
+   ```bash
+   cd backend
+   # Windows
+   install-dependencies.bat
+   
+   # Linux/Mac
+   chmod +x install-dependencies.sh
+   ./install-dependencies.sh
+   ```
+
+3. **Se o problema persistir:**
+   - Verifique se está usando Node.js v18 ou superior: `node --version`
+   - Tente instalar com `npm install --legacy-peer-deps`
+   - Verifique sua conexão com a internet
+   - Certifique-se de ter permissões de escrita na pasta
 
 ### Erro ao executar migrações
 
