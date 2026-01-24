@@ -1495,29 +1495,73 @@ const ReportDetailedConversations: React.FC = () => {
   useEffect(() => {
     if (!organization?.id) return;
 
-    const socket: Socket = io(apiBase);
+    let isMounted = true;
+    let socket: Socket | null = null;
 
-    socket.on('connect', () => {
-      socket.emit('join-organization', { organizationId: organization.id });
-    });
+    const setupSocket = async () => {
+      try {
+        // ✅ CORREÇÃO: Obter token de autenticação
+        const headers = await getAuthHeaders();
+        const accessToken = headers['Authorization']?.replace('Bearer ', '') || 
+                          JSON.parse(localStorage.getItem('auth_session') || '{}')?.access_token;
+        
+        if (!accessToken) {
+          console.warn('⚠️ [Report] Token de autenticação não encontrado para Socket.IO');
+          return;
+        }
 
-    socket.on('message-transcription-updated', (data: { messageId: string; transcription: string }) => {
-      setConversationDetails(prev => prev.map(msg =>
-        msg.id === data.messageId
-          ? {
-              ...msg,
-              metadata: {
-                ...msg.metadata,
-                transcription: data.transcription,
-                transcribing: false
-              }
-            }
-          : msg
-      ));
-    });
+        socket = io(apiBase, {
+          transports: ['websocket', 'polling'],
+          auth: {
+            token: accessToken
+          },
+          extraHeaders: {
+            'Authorization': `Bearer ${accessToken}`
+          }
+        });
+
+        socket.on('connect', () => {
+          if (!isMounted) return;
+          console.log('✅ [Report] Conectado ao Socket.IO');
+          socket?.emit('join-organization', organization.id);
+        });
+
+        socket.on('message-transcription-updated', (data: { messageId: string; transcription: string }) => {
+          if (!isMounted) return;
+          setConversationDetails(prev => prev.map(msg =>
+            msg.id === data.messageId
+              ? {
+                  ...msg,
+                  metadata: {
+                    ...msg.metadata,
+                    transcription: data.transcription,
+                    transcribing: false
+                  }
+                }
+              : msg
+          ));
+        });
+
+        socket.on('connect_error', (error) => {
+          console.error('❌ [Report] Erro de conexão Socket.IO:', error);
+        });
+
+        socket.on('disconnect', (reason) => {
+          console.log('🔌 [Report] Socket.IO desconectado:', reason);
+        });
+      } catch (error) {
+        console.error('❌ [Report] Erro ao configurar Socket.IO:', error);
+      }
+    };
+
+    setupSocket();
 
     return () => {
-      socket.disconnect();
+      isMounted = false;
+      if (socket) {
+        socket.disconnect();
+        socket = null;
+      }
     };
   }, [organization?.id]);
 

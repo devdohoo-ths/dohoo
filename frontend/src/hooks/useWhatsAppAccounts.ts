@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { apiBase, getAuthHeaders } from '@/utils/apiBase'; // ✅ CORRIGIDO
 import { useAuth } from '@/hooks/useAuth';
@@ -1013,11 +1013,24 @@ export const useWhatsAppAccounts = (options?: { disableErrorToasts?: boolean }) 
     }
   }, [profile?.id]); // ✅ REMOVIDO fetchAccounts das dependências para evitar loops
 
-  // ✅ NOVO: Verificar periodicamente contas em "connecting" para sincronizar com banco
+  // ✅ OTIMIZADO: Calcular número de contas em "connecting" com useMemo para evitar recálculos
+  const connectingCount = useMemo(() => {
+    return accounts.filter(acc => acc.status === 'connecting').length;
+  }, [accounts]);
+
+  // ✅ OTIMIZADO: Verificar periodicamente contas em "connecting" para sincronizar com banco
+  // ✅ Só executa polling se houver contas em status "connecting"
   useEffect(() => {
     if (!profile?.id) return;
 
-    const interval = setInterval(async () => {
+    // ✅ Se não houver contas em "connecting", não fazer polling
+    if (connectingCount === 0) {
+      return;
+    }
+
+    console.log(`🔄 [FRONTEND] Iniciando polling para ${connectingCount} conta(s) em "connecting"`);
+
+    const checkAndUpdate = async () => {
       // Verificar status no servidor
       try {
         const headers = await getAuthHeaders();
@@ -1027,7 +1040,10 @@ export const useWhatsAppAccounts = (options?: { disableErrorToasts?: boolean }) 
           if (result.success && result.accounts) {
             setAccounts(prev => {
               const connectingAccounts = prev.filter(acc => acc.status === 'connecting');
-              if (connectingAccounts.length === 0) return prev;
+              // ✅ Se não há mais contas em "connecting", não processar
+              if (connectingAccounts.length === 0) {
+                return prev;
+              }
 
               const updated = prev.map(localAccount => {
                 // Só verificar se está em connecting
@@ -1047,6 +1063,7 @@ export const useWhatsAppAccounts = (options?: { disableErrorToasts?: boolean }) 
                 }
                 return localAccount;
               });
+              
               return updated;
             });
           }
@@ -1054,10 +1071,16 @@ export const useWhatsAppAccounts = (options?: { disableErrorToasts?: boolean }) 
       } catch (error) {
         console.error('❌ [FRONTEND] Erro ao verificar status:', error);
       }
-    }, 10000); // Verificar a cada 10 segundos
+    };
 
-    return () => clearInterval(interval);
-  }, [profile?.id]);
+    // ✅ AUMENTADO: Verificar a cada 30 segundos (era 10s) para reduzir requisições
+    const intervalId = setInterval(checkAndUpdate, 30000);
+
+    return () => {
+      console.log('🛑 [FRONTEND] Parando polling de contas');
+      clearInterval(intervalId);
+    };
+  }, [profile?.id, connectingCount]); // ✅ Só re-executar se o número de contas "connecting" mudar
 
   const clearLastConnectedAccount = useCallback(() => setLastConnectedAccountId(null), []);
 

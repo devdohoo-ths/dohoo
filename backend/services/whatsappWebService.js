@@ -1750,8 +1750,16 @@ const processWhatsAppWebReceivedMessage = async (message, accountId, accountName
       chatId = existingChat.id;
       console.log(`📨 [${accountName}] Chat existente: ${chatId}`);
 
-      // Atualizar informações do contato se necessário
-      if (contactInfo.name && contactInfo.name !== existingChat.name) {
+      // ✅ CORREÇÃO: Atualizar informações do contato se necessário
+      // ✅ Atualizar nome apenas se:
+      // 1. Tem um nome válido (não é apenas número)
+      // 2. O nome mudou
+      // 3. Não é mensagem própria (para evitar atualizar com nome do usuário)
+      const hasValidName = contactInfo.name && 
+                          contactInfo.name !== phoneNumber && 
+                          !/^\d+$/.test(contactInfo.name.trim()) &&
+                          !isOwnMessage;
+      if (hasValidName && contactInfo.name !== existingChat.name) {
         console.log(`🔄 [${accountName}] Atualizando nome do chat: ${existingChat.name} → ${contactInfo.name}`);
         await supabase
           .from('chats')
@@ -1763,11 +1771,25 @@ const processWhatsAppWebReceivedMessage = async (message, accountId, accountName
           .eq('id', chatId);
       }
     } else {
+      // ✅ CORREÇÃO: Ao criar chat novo ao receber mensagem do cliente
+      // ✅ Usar nome do cliente se disponível e válido, senão usar número
+      let finalChatName = phoneNumber; // Padrão: usar número
+      
+      if (contactInfo.name && 
+          contactInfo.name !== phoneNumber && 
+          !/^\d+$/.test(contactInfo.name.trim()) &&
+          !isOwnMessage) { // ✅ Só usar nome se não for mensagem própria
+        finalChatName = contactInfo.name;
+        console.log(`✅ [${accountName}] Usando nome do cliente: ${finalChatName}`);
+      } else {
+        console.log(`📱 [${accountName}] Usando número do cliente: ${finalChatName} (nome será atualizado quando disponível)`);
+      }
+      
       // Criar novo chat
       const { data: newChat, error: createError } = await supabase
         .from('chats')
         .insert({
-          name: contactName,
+          name: finalChatName,
           platform: 'whatsapp',
           whatsapp_jid: targetJid,
           assigned_agent_id: accountData.user_id,
@@ -1785,7 +1807,7 @@ const processWhatsAppWebReceivedMessage = async (message, accountId, accountName
       }
 
       chatId = newChat.id;
-      console.log(`📨 [${accountName}] Novo chat criado: ${chatId} (Individual)`);
+      console.log(`📨 [${accountName}] Novo chat criado: ${chatId} (Individual) com nome: ${finalChatName}`);
     }
 
     // ✅ Processar mídia (usando função adaptada para whatsapp-web.js)

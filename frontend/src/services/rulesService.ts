@@ -6,20 +6,21 @@ import {
   ProcessHistoricalRequest,
   ProcessHistoricalResponse
 } from '../types/rules';
-import { apiBase, getAuthHeadersSync } from '../utils/apiBase';
+import { apiBase, getAuthHeaders } from '../utils/apiBase';
 
 export class RulesService {
   // Listar regras
   static async getRules(userId?: string): Promise<MonitoringRule[]> {
     try {
-      const headers = getAuthHeadersSync(userId);
-      console.log('🔍 [RulesService] Headers de autenticação:', headers);
+      // ✅ CORREÇÃO: Usar getAuthHeaders assíncrono em vez de getAuthHeadersSync
+      const headers = await getAuthHeaders();
+      console.log('🔍 [RulesService] Headers de autenticação obtidos');
       
       const response = await fetch(`${apiBase}/api/rules`, {
         method: 'GET',
         headers: {
-          ...headers
-          // ✅ CORREÇÃO: Remover x-user-id hardcoded
+          ...headers,
+          'Content-Type': 'application/json'
         }
       });
 
@@ -28,7 +29,22 @@ export class RulesService {
       if (!response.ok) {
         const errorText = await response.text();
         console.error('❌ [RulesService] Erro na resposta:', errorText);
-        throw new Error(`Erro ao carregar regras: ${response.status} - ${errorText}`);
+        
+        // ✅ CORREÇÃO: Verificar se a resposta é HTML (erro do Cloudflare/Supabase)
+        if (errorText.includes('<!DOCTYPE html>') || errorText.includes('Internal server error')) {
+          throw new Error('Serviço temporariamente indisponível. Tente novamente em alguns instantes.');
+        }
+        
+        // Tentar parsear como JSON se possível
+        let errorMessage = errorText;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.error || errorJson.message || errorText;
+        } catch {
+          // Se não for JSON, usar o texto como está
+        }
+        
+        throw new Error(`Erro ao carregar regras: ${response.status} - ${errorMessage.substring(0, 200)}`);
       }
 
       const data = await response.json();
@@ -42,14 +58,15 @@ export class RulesService {
 
   // Criar regra
   static async createRule(rule: CreateRuleRequest, userId?: string): Promise<MonitoringRule> {
-    const headers = getAuthHeadersSync(userId);
-    console.log('🔍 [RulesService] Criando regra com headers:', headers);
+    // ✅ CORREÇÃO: Usar getAuthHeaders assíncrono
+    const headers = await getAuthHeaders();
+    console.log('🔍 [RulesService] Criando regra');
     
     const response = await fetch(`${apiBase}/api/rules`, {
       method: 'POST',
       headers: {
-        ...headers
-        // ✅ CORREÇÃO: Remover x-user-id hardcoded
+        ...headers,
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify(rule)
     });
@@ -69,13 +86,14 @@ export class RulesService {
 
   // Atualizar regra
   static async updateRule(id: string, rule: UpdateRuleRequest, userId?: string): Promise<MonitoringRule> {
-    const headers = getAuthHeadersSync(userId);
+    // ✅ CORREÇÃO: Usar getAuthHeaders assíncrono
+    const headers = await getAuthHeaders();
     
     const response = await fetch(`${apiBase}/api/rules/${id}`, {
       method: 'PUT',
       headers: {
-        ...headers
-        // ✅ CORREÇÃO: Remover x-user-id hardcoded
+        ...headers,
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify(rule)
     });
@@ -90,13 +108,14 @@ export class RulesService {
 
   // Deletar regra
   static async deleteRule(id: string, userId?: string): Promise<void> {
-    const headers = getAuthHeadersSync(userId);
+    // ✅ CORREÇÃO: Usar getAuthHeaders assíncrono
+    const headers = await getAuthHeaders();
     
     const response = await fetch(`${apiBase}/api/rules/${id}`, {
       method: 'DELETE',
       headers: {
-        ...headers
-        // ✅ CORREÇÃO: Remover x-user-id hardcoded
+        ...headers,
+        'Content-Type': 'application/json'
       }
     });
 
@@ -112,13 +131,14 @@ export class RulesService {
     ruleId?: string,
     userId?: string
   ): Promise<RuleReportResponse> {
-    const headers = getAuthHeadersSync(userId);
+    // ✅ CORREÇÃO: Usar getAuthHeaders assíncrono
+    const headers = await getAuthHeaders();
     
     const response = await fetch(`${apiBase}/api/rules/report`, {
       method: 'POST',
       headers: {
-        ...headers
-        // ✅ CORREÇÃO: Remover x-user-id hardcoded
+        ...headers,
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({ dateStart, dateEnd, ruleId })
     });
@@ -135,13 +155,14 @@ export class RulesService {
     request: ProcessHistoricalRequest,
     userId?: string
   ): Promise<ProcessHistoricalResponse> {
-    const headers = getAuthHeadersSync(userId);
+    // ✅ CORREÇÃO: Usar getAuthHeaders assíncrono
+    const headers = await getAuthHeaders();
     
     const response = await fetch(`${apiBase}/api/rules/process-historical`, {
       method: 'POST',
       headers: {
-        ...headers
-        // ✅ CORREÇÃO: Remover x-user-id hardcoded
+        ...headers,
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify(request)
     });

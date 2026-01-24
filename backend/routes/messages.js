@@ -1,17 +1,12 @@
 import express from 'express';
-import { createClient } from '@supabase/supabase-js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { authenticateToken as auth } from '../middleware/auth.js';
 import { getUnifiedData } from '../services/unifiedDataService.js';
+import { supabaseAdmin } from '../lib/supabaseClient.js';
 
 const router = express.Router();
-
-// Configuração do Supabase
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -34,6 +29,285 @@ router.get('/stats-test', (req, res) => {
     query: req.query,
     timestamp: new Date().toISOString()
   });
+});
+
+// GET /api/messages - Buscar mensagens com filtros
+router.get('/', auth, async (req, res) => {
+  try {
+    console.log('🔍 [API] GET /api/messages chamado');
+    const { user } = req;
+    
+    if (!user || !user.organization_id) {
+      console.log('❌ [API] Usuário não autenticado ou sem organização');
+      return res.status(401).json({ error: 'Usuário não autenticado ou sem organização' });
+    }
+
+    const { 
+      organization_id,
+      dateStart, 
+      dateEnd, 
+      limit: limitParam,
+      keyword,
+      agents // Filtro por agentes (user_id)
+    } = req.query;
+
+    // ✅ Limitar o máximo de resultados para evitar problemas de performance
+    const maxLimit = 10000; // Limite máximo seguro
+    const limit = Math.min(parseInt(limitParam) || 1000, maxLimit);
+
+    console.log('🔍 [API] Parâmetros recebidos:', { organization_id, dateStart, dateEnd, limit, keyword, agents });
+
+    // ✅ Usar organization_id do parâmetro ou do usuário
+    const targetOrganizationId = organization_id || user.organization_id;
+    console.log('🔍 [API] Organization ID alvo:', targetOrganizationId);
+    
+    if (!targetOrganizationId) {
+      console.error('❌ [API] Organization ID não encontrado');
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Organization ID é obrigatório' 
+      });
+    }
+
+    // ✅ Verificar role do usuário para filtrar dados se for agente
+    let isAgent = false;
+    
+    try {
+      const { data: userProfile, error: profileError } = await supabase
+        .from('profiles')
+        .select('role_id')
+        .eq('id', user.id)
+        .single();
+
+      if (!profileError && userProfile?.role_id) {
+        const { data: role, error: roleError } = await supabase
+          .from('roles')
+          .select('name')
+          .eq('id', userProfile.role_id)
+          .single();
+
+        if (!roleError && role?.name) {
+          isAgent = role.name.toLowerCase().includes('agente') || role.name.toLowerCase().includes('agent');
+        }
+      }
+    } catch (error) {
+      // Erro silencioso
+    }
+
+    // ✅ Construir query base (simplificada inicialmente para evitar problemas com relacionamentos)
+    // ✅ CORREÇÃO: Usar supabaseAdmin para garantir acesso completo
+    let messagesQuery = supabaseAdmin
+      .from('messages')
+      .select(`
+        id,
+        chat_id,
+        content,
+        is_from_me,
+        created_at,
+        sender_name,
+        organization_id
+      `)
+      .eq('organization_id', targetOrganizationId);
+
+    // ✅ Aplicar filtro de data se fornecido
+    if (dateStart) {
+      try {
+        const startDate = new Date(dateStart);
+        if (isNaN(startDate.getTime())) {
+          console.warn('⚠️ [API] Data de início inválida:', dateStart);
+        } else {
+          startDate.setUTCHours(0, 0, 0, 0);
+          messagesQuery = messagesQuery.gte('created_at', startDate.toISOString());
+          console.log('🔍 [API] Filtro de data início aplicado:', startDate.toISOString());
+        }
+      } catch (dateError) {
+        console.warn('⚠️ [API] Erro ao processar data de início:', dateError);
+      }
+    }
+
+    if (dateEnd) {
+      try {
+        const endDate = new Date(dateEnd);
+        if (isNaN(endDate.getTime())) {
+          console.warn('⚠️ [API] Data de fim inválida:', dateEnd);
+        } else {
+          endDate.setUTCHours(23, 59, 59, 999);
+          messagesQuery = messagesQuery.lte('created_at', endDate.toISOString());
+          console.log('🔍 [API] Filtro de data fim aplicado:', endDate.toISOString());
+        }
+      } catch (dateError) {
+        console.warn('⚠️ [API] Erro ao processar data de fim:', dateError);
+      }
+    }
+
+    // ✅ Filtro por keyword (busca no conteúdo)
+    if (keyword && keyword.trim()) {
+      messagesQuery = messagesQuery.ilike('content', `%${keyword.trim()}%`);
+    }
+
+    // ✅ Determinar chatIds para filtro (se necessário)
+    let chatIds = null;
+    
+    // ✅ Filtro por agente: Se for agente, filtrar mensagens de conversas atribuídas a ele
+    if (isAgent) {
+      const { data: agentChats, error: chatsError } = await supabaseAdmin
+        .from('chats')
+        .select('id')
+        .eq('organization_id', targetOrganizationId)
+        .eq('assigned_agent_id', user.id);
+      
+      if (!chatsError && agentChats && agentChats.length > 0) {
+        chatIds = agentChats.map(c => c.id);
+        messagesQuery = messagesQuery.in('chat_id', chatIds);
+      } else {
+        // Se não tem conversas, retornar array vazio
+        return res.json({ success: true, messages: [], total: 0 });
+      }
+    }
+
+    // ✅ Filtro por agentes específicos (se fornecido)
+    if (agents && agents.trim()) {
+      const agentIds = agents.split(',').map(id => id.trim());
+      const { data: agentChats, error: chatsError } = await supabaseAdmin
+        .from('chats')
+        .select('id')
+        .eq('organization_id', targetOrganizationId)
+        .in('assigned_agent_id', agentIds);
+      
+      if (!chatsError && agentChats && agentChats.length > 0) {
+        chatIds = agentChats.map(c => c.id);
+        messagesQuery = messagesQuery.in('chat_id', chatIds);
+      } else {
+        // Se não tem conversas para esses agentes, retornar array vazio
+        return res.json({ success: true, messages: [], total: 0 });
+      }
+    }
+
+    // ✅ Aplicar ordenação e limite
+    messagesQuery = messagesQuery
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    console.log('🔍 [API] Executando query de mensagens...');
+    
+    // ✅ Buscar mensagens
+    let messages = [];
+    let messagesError = null;
+    
+    try {
+      const result = await messagesQuery;
+      messages = result.data || [];
+      messagesError = result.error;
+      
+      if (messagesError) {
+        console.error('❌ [API] Erro retornado pela query:', messagesError);
+        console.error('❌ [API] Código do erro:', messagesError.code);
+        console.error('❌ [API] Mensagem do erro:', messagesError.message);
+        console.error('❌ [API] Detalhes completos:', JSON.stringify(messagesError, null, 2));
+      } else {
+        console.log(`✅ [API] Query executada com sucesso. Mensagens encontradas: ${messages.length}`);
+      }
+    } catch (queryError) {
+      console.error('❌ [API] Exceção ao executar query:', queryError);
+      console.error('❌ [API] Stack trace:', queryError.stack);
+      messagesError = queryError;
+    }
+
+    if (messagesError) {
+      return res.status(500).json({ 
+        success: false, 
+        error: `Erro ao buscar mensagens: ${messagesError.message || messagesError.code || 'Erro desconhecido'}`,
+        details: process.env.NODE_ENV === 'development' ? messagesError : undefined
+      });
+    }
+    
+    // ✅ Buscar dados dos chats separadamente para enriquecer as mensagens
+    if (messages.length > 0) {
+      const chatIds = [...new Set(messages.map(m => m.chat_id).filter(Boolean))];
+      if (chatIds.length > 0) {
+        try {
+          const { data: chatsData, error: chatsError } = await supabaseAdmin
+            .from('chats')
+            .select('id, name, platform, assigned_agent_id, contact_name, contact_phone')
+            .in('id', chatIds);
+          
+          if (!chatsError && chatsData) {
+            const chatsMap = new Map(chatsData.map(c => [c.id, c]));
+            messages = messages.map(msg => ({
+              ...msg,
+              chats: chatsMap.get(msg.chat_id) || null
+            }));
+            console.log(`✅ [API] Dados de chats enriquecidos: ${chatsData.length} chats encontrados`);
+          } else if (chatsError) {
+            console.warn('⚠️ [API] Erro ao buscar chats (continuando sem enriquecimento):', chatsError.message);
+          }
+        } catch (chatsException) {
+          console.warn('⚠️ [API] Exceção ao buscar chats (continuando sem enriquecimento):', chatsException.message);
+        }
+      }
+    }
+
+    // ✅ Buscar count separadamente (mais eficiente e evita problemas com relacionamentos)
+    // ✅ CORREÇÃO: Usar supabaseAdmin para garantir acesso completo
+    let countQuery = supabaseAdmin
+      .from('messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('organization_id', targetOrganizationId);
+
+    // Aplicar os mesmos filtros no count
+    if (dateStart) {
+      try {
+        const startDate = new Date(dateStart);
+        if (!isNaN(startDate.getTime())) {
+          startDate.setUTCHours(0, 0, 0, 0);
+          countQuery = countQuery.gte('created_at', startDate.toISOString());
+        }
+      } catch (dateError) {
+        console.warn('⚠️ [API] Erro ao processar data de início no count:', dateError);
+      }
+    }
+
+    if (dateEnd) {
+      try {
+        const endDate = new Date(dateEnd);
+        if (!isNaN(endDate.getTime())) {
+          endDate.setUTCHours(23, 59, 59, 999);
+          countQuery = countQuery.lte('created_at', endDate.toISOString());
+        }
+      } catch (dateError) {
+        console.warn('⚠️ [API] Erro ao processar data de fim no count:', dateError);
+      }
+    }
+
+    if (keyword && keyword.trim()) {
+      countQuery = countQuery.ilike('content', `%${keyword.trim()}%`);
+    }
+
+    // ✅ Aplicar filtros de chat_id no count se houver
+    if (chatIds && chatIds.length > 0) {
+      countQuery = countQuery.in('chat_id', chatIds);
+    }
+
+    const { count: totalCount, error: countError } = await countQuery;
+    
+    if (countError) {
+      console.warn('⚠️ [API] Erro ao buscar count (usando length como fallback):', countError);
+    }
+
+    console.log(`✅ [API] Mensagens encontradas: ${messages?.length || 0}, Total: ${totalCount || messages?.length || 0}`);
+    
+    res.json({ 
+      success: true, 
+      messages: messages || [], 
+      total: totalCount || messages?.length || 0 
+    });
+  } catch (error) {
+    console.error('❌ [API] Erro geral ao buscar mensagens:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Erro interno do servidor' 
+    });
+  }
 });
 
 // GET /api/messages/recent - Buscar mensagens recentes

@@ -29,7 +29,17 @@ router.get('/', authenticateToken, async (req, res) => {
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.error('❌ Erro ao buscar regras:', error);
+      console.error('❌ [RULES] Erro do Supabase ao buscar regras:', error);
+      
+      // ✅ CORREÇÃO: Verificar se o erro é uma resposta HTML (erro do Cloudflare/Supabase)
+      if (error.message && error.message.includes('<!DOCTYPE html>')) {
+        console.error('❌ [RULES] Supabase retornou HTML (erro 500 do Cloudflare)');
+        return res.status(503).json({ 
+          success: false, 
+          error: 'Serviço temporariamente indisponível. Tente novamente em alguns instantes.' 
+        });
+      }
+      
       throw new Error(`Erro ao buscar regras: ${error.message}`);
     }
 

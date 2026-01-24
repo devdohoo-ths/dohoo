@@ -165,94 +165,113 @@ export const useSupabaseChat = () => {
 
       // 🔒 SEGURANÇA: Escutar novas mensagens com verificações robustas
       newSocket.on('new-message', async (data) => {
-      
-      // Verificação básica de dados
-      if (!data || !data.message || !data.chatId) {
-        console.error('❌ Dados inválidos recebidos:', data);
-        return;
-      }
-
-      // 🔒 VERIFICAÇÃO CRÍTICA 1: ID do usuário
-      if (data.userId && data.userId !== user.id) {
-        console.warn('🚨 Tentativa de receber mensagem de outro usuário bloqueada:', { 
-          messageUserId: data.userId, 
-          currentUserId: user.id,
-          chatId: data.chatId,
-          messageContent: data.message?.content?.substring(0, 50) 
-        });
-        return;
-      }
-
-      try {
-        // 🔒 VERIFICAÇÃO CRÍTICA 2: Propriedade do chat no banco de dados via API
-        const headers = await getAuthHeaders();
-        const chatResponse = await fetch(`${apiBase}/api/chat/${data.chatId}`, {
-          headers
-        });
-
-        if (!chatResponse.ok) {
-          console.warn('🚨 Mensagem de chat que não pertence ao usuário bloqueada (verificação no banco):', {
-            chatId: data.chatId,
+        try {
+          console.log('📨 [Socket.IO] Evento new-message recebido:', {
+            chatId: data?.chatId,
+            messageId: data?.message?.id,
+            userId: data?.userId,
             currentUserId: user.id,
-            error: `Erro ${chatResponse.status}`
+            isFromMe: data?.message?.is_from_me
           });
-          return;
-        }
-
-        const chatData = await chatResponse.json();
-        const chatOwnership = chatData.chat || chatData.data;
-
-        if (!chatOwnership || chatOwnership.assigned_agent_id !== user.id) {
-          console.warn('🚨 Mensagem de chat que não pertence ao usuário bloqueada (verificação no banco):', {
-            chatId: data.chatId,
-            currentUserId: user.id,
-            assignedAgentId: chatOwnership?.assigned_agent_id
-          });
-          return;
-        }
-
-
-        const { chatId, message, isAI } = data;
         
-        // Se for do chat ativo, adicionar à lista de mensagens
-        if (activeChat === chatId) {
-          setMessages(prev => {
-            // Verificar se a mensagem já existe
-            if (message.id && prev.some(msg => msg.id === message.id)) {
-              return prev;
-            }
-            const convertedMessage = {
-              ...message,
-              sender: message.is_from_me ? 'agent' : 'user',
-              timestamp: new Date(message.created_at),
-              message_type: message.message_type || 'text',
-              metadata: {
-                ai_generated: isAI || false,
-                assistant_id: null,
-                tokens_used: null,
-                transcription: null,
-                transcribed_at: null
+          // Verificação básica de dados
+          if (!data || !data.message || !data.chatId) {
+            console.error('❌ Dados inválidos recebidos:', data);
+            return;
+          }
+
+          // 🔒 VERIFICAÇÃO CRÍTICA 1: ID do usuário
+          // ✅ CORREÇÃO: Permitir mensagens próprias (is_from_me) mesmo se userId não corresponder exatamente
+          // (isso pode acontecer em alguns casos de sincronização)
+          if (data.userId && data.userId !== user.id && !data.message.is_from_me) {
+            console.warn('🚨 Tentativa de receber mensagem de outro usuário bloqueada:', { 
+              messageUserId: data.userId, 
+              currentUserId: user.id,
+              chatId: data.chatId,
+              messageContent: data.message?.content?.substring(0, 50) 
+            });
+            return;
+          }
+
+          const { chatId, message, isAI } = data;
+          
+          // ✅ OTIMIZAÇÃO: Se for mensagem própria (is_from_me), pular verificação de propriedade do chat
+          // (mensagens próprias sempre devem ser exibidas)
+          if (!message.is_from_me) {
+            try {
+              // 🔒 VERIFICAÇÃO CRÍTICA 2: Propriedade do chat no banco de dados via API (apenas para mensagens de outros)
+              const headers = await getAuthHeaders();
+              const chatResponse = await fetch(`${apiBase}/api/chat/${data.chatId}`, {
+                headers
+              });
+
+              if (!chatResponse.ok) {
+                console.warn('🚨 Mensagem de chat que não pertence ao usuário bloqueada (verificação no banco):', {
+                  chatId: data.chatId,
+                  currentUserId: user.id,
+                  error: `Erro ${chatResponse.status}`
+                });
+                return;
               }
-            };
-            return [...prev, convertedMessage];
-          });
-        }
-        
-        // Sempre atualizar lista de chats
-        fetchChats();
-        
-        // Notificação apenas se não for do chat ativo e não for minha mensagem
-        if (activeChat !== chatId && !message.is_from_me) {
-          toast({
-            title: "Nova mensagem",
-            description: `${message.sender_name || 'Cliente'}: ${message.content}`,
-          });
-        }
 
-      } catch (error) {
-        console.error('❌ Erro ao verificar propriedade do chat:', error);
-      }
-    });
+              const chatData = await chatResponse.json();
+              const chatOwnership = chatData.chat || chatData.data;
+
+              if (!chatOwnership || chatOwnership.assigned_agent_id !== user.id) {
+                console.warn('🚨 Mensagem de chat que não pertence ao usuário bloqueada (verificação no banco):', {
+                  chatId: data.chatId,
+                  currentUserId: user.id,
+                  assignedAgentId: chatOwnership?.assigned_agent_id
+                });
+                return;
+              }
+            } catch (error) {
+              console.error('❌ Erro ao verificar propriedade do chat:', error);
+              // ✅ Não bloquear mensagem própria mesmo se houver erro na verificação
+              if (!message.is_from_me) {
+                return;
+              }
+            }
+          }
+            
+          // Se for do chat ativo, adicionar à lista de mensagens
+          if (activeChat === chatId) {
+            setMessages(prev => {
+              // Verificar se a mensagem já existe
+              if (message.id && prev.some(msg => msg.id === message.id)) {
+                return prev;
+              }
+              const convertedMessage = {
+                ...message,
+                sender: message.is_from_me ? 'agent' : 'user',
+                timestamp: new Date(message.created_at),
+                message_type: message.message_type || 'text',
+                metadata: {
+                  ai_generated: isAI || false,
+                  assistant_id: null,
+                  tokens_used: null,
+                  transcription: null,
+                  transcribed_at: null
+                }
+              };
+              return [...prev, convertedMessage];
+            });
+          }
+          
+          // Sempre atualizar lista de chats
+          fetchChats();
+          
+          // Notificação apenas se não for do chat ativo e não for minha mensagem
+          if (activeChat !== chatId && !message.is_from_me) {
+            toast({
+              title: "Nova mensagem",
+              description: `${message.sender_name || 'Cliente'}: ${message.content}`,
+            });
+          }
+        } catch (error) {
+          console.error('❌ Erro geral ao processar nova mensagem:', error);
+        }
+      });
 
       return () => {
         newSocket.disconnect();

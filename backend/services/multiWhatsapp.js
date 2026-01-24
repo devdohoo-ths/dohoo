@@ -3907,8 +3907,15 @@ async function processReceivedMessage(message, accountId, accountName, sock) {
       }
 
       // ✅ CORREÇÃO: Atualizar informações do contato se necessário
-      // Atualizar nome se mudou OU avatar_url se não existe mas temos foto disponível
-      const nameChanged = contactInfo.name && contactInfo.name !== existingChat.name;
+      // ✅ Atualizar nome apenas se:
+      // 1. Tem um nome válido (não é apenas número)
+      // 2. O nome mudou
+      // 3. Não é mensagem própria (para evitar atualizar com nome do usuário)
+      const hasValidName = contactInfo.name && 
+                          contactInfo.name !== phoneNumber && 
+                          !/^\d+$/.test(contactInfo.name.trim()) &&
+                          !isOwnMessage;
+      const nameChanged = hasValidName && contactInfo.name !== existingChat.name;
       const needsAvatarUpdate = contactInfo.profilePicture && !existingChat.avatar_url;
       
       if (nameChanged || needsAvatarUpdate || needsJidUpdate) {
@@ -3922,7 +3929,7 @@ async function processReceivedMessage(message, accountId, accountName, sock) {
         await supabase
           .from('chats')
           .update({
-            name: contactInfo.name || existingChat.name,
+            name: hasValidName ? contactInfo.name : existingChat.name, // ✅ Só atualizar se tiver nome válido
             avatar_url: contactInfo.profilePicture || existingChat.avatar_url,
             whatsapp_jid: targetJid, // ✅ Sempre garantir que está correto
             is_group: false
@@ -3930,11 +3937,26 @@ async function processReceivedMessage(message, accountId, accountName, sock) {
           .eq('id', chatId);
       }
     } else {
+      // ✅ CORREÇÃO: Ao criar chat novo ao receber mensagem do cliente
+      // ✅ Usar nome do cliente se disponível e válido, senão usar número
+      // ✅ Validar se o nome não é apenas um número ou nome do próprio usuário
+      let finalChatName = phoneNumber; // Padrão: usar número
+      
+      if (contactInfo.name && 
+          contactInfo.name !== phoneNumber && 
+          !/^\d+$/.test(contactInfo.name.trim()) &&
+          !isOwnMessage) { // ✅ Só usar nome se não for mensagem própria
+        finalChatName = contactInfo.name;
+        console.log(`✅ [${accountName}] Usando nome do cliente: ${finalChatName}`);
+      } else {
+        console.log(`📱 [${accountName}] Usando número do cliente: ${finalChatName} (nome será atualizado quando disponível)`);
+      }
+      
       // ✅ Criar novo chat
       const { data: newChat, error: createError } = await supabase
         .from('chats')
         .insert({
-          name: contactName,
+          name: finalChatName,
           platform: 'whatsapp',
           whatsapp_jid: targetJid,
           assigned_agent_id: accountData.user_id,
@@ -3952,7 +3974,7 @@ async function processReceivedMessage(message, accountId, accountName, sock) {
       }
 
       chatId = newChat.id;
-      console.log(`📨 [${accountName}] Novo chat criado: ${chatId} (Individual)`);
+      console.log(`📨 [${accountName}] Novo chat criado: ${chatId} (Individual) com nome: ${finalChatName}`);
     }
 
     // ✅ Processar mídia
@@ -5754,7 +5776,6 @@ async function processBroadcastSent(message, toJid, accountId, accountName, sock
     // ✅ MELHORADO: Buscar informações completas do contato
     const contactInfo = await getContactInfo(sock, toJid);
     const phoneNumber = contactInfo.phoneNumber;
-    let chatName = contactInfo.name || phoneNumber;
     let avatarUrl = contactInfo.profilePicture;
 
     console.log(`👤 [INDIVIDUAL SAVE] Informações do destinatário:`, {
@@ -5778,8 +5799,9 @@ async function processBroadcastSent(message, toJid, accountId, accountName, sock
       chatId = existingChat.id;
       console.log(`📤 [INDIVIDUAL SAVE] Chat existente: ${chatId}`);
 
-      // ✅ ATUALIZAR: Informações do contato sempre que temos um nome
-      if (contactInfo.name) {
+      // ✅ ATUALIZAR: Informações do contato sempre que temos um nome válido (não é número)
+      // ✅ CORREÇÃO: Só atualizar se o nome não for apenas um número (evita atualizar com número quando já tem nome)
+      if (contactInfo.name && contactInfo.name !== phoneNumber && !/^\d+$/.test(contactInfo.name.trim())) {
         console.log(`🔄 [INDIVIDUAL SAVE] Atualizando nome do chat: ${existingChat.name} → ${contactInfo.name}`);
         await supabase
           .from('chats')
@@ -5790,17 +5812,18 @@ async function processBroadcastSent(message, toJid, accountId, accountName, sock
           .eq('id', chatId);
       }
     } else {
-      // ✅ MELHORADO: Criar novo chat com informações completas
+      // ✅ CORREÇÃO: Ao criar chat novo (primeira mensagem enviada), usar APENAS o número do telefone
+      // ✅ O nome do cliente só será atualizado quando ele responder (via processReceivedMessage)
       const { data: newChat, error: createError } = await supabase
         .from('chats')
         .insert({
-          name: chatName,
+          name: phoneNumber, // ✅ Usar apenas o número, não o nome
           platform: 'whatsapp',
           whatsapp_jid: toJid,
           assigned_agent_id: accountData.user_id,
           status: 'active',
           organization_id: accountData.organization_id,
-          avatar_url: avatarUrl // ✅ NOVO: Incluir foto do perfil
+          avatar_url: avatarUrl
         })
         .select('id')
         .single();
@@ -5811,7 +5834,7 @@ async function processBroadcastSent(message, toJid, accountId, accountName, sock
       }
 
       chatId = newChat.id;
-      console.log(`📤 [INDIVIDUAL SAVE] Novo chat criado: ${chatId} com nome: ${chatName}`);
+      console.log(`📤 [INDIVIDUAL SAVE] Novo chat criado: ${chatId} com número: ${phoneNumber} (nome será atualizado quando cliente responder)`);
     }
 
     // Processar mídia

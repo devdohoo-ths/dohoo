@@ -364,6 +364,35 @@ router.post('/chats/:chatId/messages', async (req, res) => {
 
     console.log('✅ [API] Mensagem enviada com sucesso:', newMessage.id);
 
+    // ✅ NOVO: Emitir evento Socket.IO para atualizar frontend em tempo real
+    try {
+      const io = global.io;
+      if (io) {
+        console.log('📡 [API] Emitindo evento new-message para atualização em tempo real');
+        console.log('📡 [API] Dados do evento:', {
+          userId,
+          chatId,
+          messageId: newMessage.id,
+          organizationId: chat.organization_id
+        });
+        
+        // ✅ Emitir para o usuário específico (sala que o frontend já está escutando)
+        io.to(`user-${userId}`).emit('new-message', {
+          chatId: chatId,
+          message: newMessage,
+          userId: userId,
+          isAI: false
+        });
+        
+        console.log('✅ [API] Evento new-message emitido para user-' + userId);
+      } else {
+        console.warn('⚠️ [API] Socket.IO não disponível (global.io) - mensagem não será atualizada em tempo real');
+      }
+    } catch (socketError) {
+      console.error('❌ [API] Erro ao emitir evento Socket.IO (não crítico):', socketError);
+      console.error('❌ [API] Stack:', socketError.stack);
+    }
+
     // 📞 Capturar contato automaticamente após envio de mensagem
     try {
       // Buscar dados do chat para obter o número do destinatário

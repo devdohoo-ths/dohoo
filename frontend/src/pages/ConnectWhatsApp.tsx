@@ -22,6 +22,12 @@ const ConnectWhatsApp: React.FC = () => {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { isAuthenticated } = useAuth();
+  
+  // ✅ Função auxiliar para determinar o caminho de redirecionamento
+  const getRedirectPath = () => {
+    return isAuthenticated ? '/accounts' : '/connections';
+  };
   
   const [invite, setInvite] = useState<InviteData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -474,13 +480,17 @@ const ConnectWhatsApp: React.FC = () => {
       const redirectTimer = setTimeout(() => {
         console.log('🚀 [Frontend] Redirecionando devido ao estado connected=true...');
         try {
-          navigate('/connections');
+          // ✅ CORREÇÃO: Redirecionar para /accounts se estiver logado, senão para /connections
+          const redirectPath = isAuthenticated ? '/accounts' : '/connections';
+          console.log(`📍 [Frontend] Redirecionando para: ${redirectPath} (autenticado: ${isAuthenticated})`);
+          navigate(redirectPath);
           console.log('✅ [Frontend] Redirecionamento executado com sucesso (via useEffect)');
         } catch (navError) {
           console.error('❌ [Frontend] Erro ao executar navigate:', navError);
           // Fallback: usar window.location se navigate falhar
           console.log('🔄 [Frontend] Tentando fallback com window.location...');
-          window.location.href = '/connections';
+          const redirectPath = isAuthenticated ? '/accounts' : '/connections';
+          window.location.href = redirectPath;
         }
       }, 3000); // 3 segundos para dar tempo do toast aparecer
 
@@ -488,7 +498,7 @@ const ConnectWhatsApp: React.FC = () => {
         clearTimeout(redirectTimer);
       };
     }
-  }, [connected, token, invite, navigate]);
+  }, [connected, token, invite, navigate, isAuthenticated]);
 
 
   const validateToken = async () => {
@@ -762,33 +772,35 @@ const ConnectWhatsApp: React.FC = () => {
 
       // ✅ CORREÇÃO: Usar navigate do React Router em vez de window.location.href
       // Redirecionar para /connections após 2 segundos para dar tempo do toast aparecer
-      console.log('⏰ [Frontend] Agendando redirecionamento para /connections em 2 segundos...');
+      const redirectPath = getRedirectPath();
+      console.log(`⏰ [Frontend] Agendando redirecionamento para ${redirectPath} em 2 segundos...`);
       setTimeout(() => {
-        console.log('🚀 [Frontend] Executando redirecionamento para /connections...');
+        console.log(`🚀 [Frontend] Executando redirecionamento para ${redirectPath}...`);
         try {
-          navigate('/connections');
+          navigate(redirectPath);
           console.log('✅ [Frontend] Redirecionamento executado com sucesso');
         } catch (navError) {
           console.error('❌ [Frontend] Erro ao executar navigate:', navError);
           // Fallback: usar window.location se navigate falhar
           console.log('🔄 [Frontend] Tentando fallback com window.location...');
-          window.location.href = '/connections';
+          window.location.href = redirectPath;
         }
       }, 2000);
     } catch (error) {
       console.error('❌ [Frontend] Erro ao marcar convite como aceito:', error);
       // ✅ CORREÇÃO: Mesmo com erro na API, redirecionar após 2 segundos
-      console.log('⏰ [Frontend] Erro na API, mas agendando redirecionamento mesmo assim...');
+      const redirectPath = getRedirectPath();
+      console.log(`⏰ [Frontend] Erro na API, mas agendando redirecionamento para ${redirectPath} mesmo assim...`);
       setTimeout(() => {
-        console.log('🚀 [Frontend] Executando redirecionamento após erro na API...');
+        console.log(`🚀 [Frontend] Executando redirecionamento após erro na API para ${redirectPath}...`);
         try {
-          navigate('/connections');
+          navigate(redirectPath);
           console.log('✅ [Frontend] Redirecionamento executado com sucesso (após erro)');
         } catch (navError) {
           console.error('❌ [Frontend] Erro ao executar navigate:', navError);
           // Fallback: usar window.location se navigate falhar
           console.log('🔄 [Frontend] Tentando fallback com window.location...');
-          window.location.href = '/connections';
+          window.location.href = redirectPath;
         }
       }, 2000);
     }
@@ -848,12 +860,13 @@ const ConnectWhatsApp: React.FC = () => {
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto mb-4"></div>
             <Button 
               onClick={() => {
-                console.log('🚀 [Frontend] Botão de redirecionamento manual clicado');
-                navigate('/connections', { replace: true });
+                const redirectPath = getRedirectPath();
+                console.log(`🚀 [Frontend] Botão de redirecionamento manual clicado - redirecionando para ${redirectPath}`);
+                navigate(redirectPath, { replace: true });
               }}
               className="mt-4"
             >
-              Ir para Conexões Agora
+              {isAuthenticated ? 'Ir para Contas Agora' : 'Ir para Conexões Agora'}
             </Button>
           </CardContent>
         </Card>

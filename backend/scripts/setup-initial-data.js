@@ -157,18 +157,113 @@ async function getOrCreateAdminRole(organizationId) {
   }
 
   if (existingRoles && existingRoles.length > 0) {
-    return existingRoles[0];
+    const existingRole = existingRoles[0];
+    
+    // ✅ CORREÇÃO: Verificar se a role tem a estrutura de permissões correta
+    const hasAdvancedSettings = existingRole.permissions?.advanced_settings?.manage_organizations === true;
+    
+    if (!hasAdvancedSettings) {
+      console.log(`   Atualizando permissões da role "Super Admin"...`);
+      // Atualizar permissões com estrutura correta
+      const updatedPermissions = {
+        ...existingRole.permissions,
+        advanced_settings: {
+          access_logs: true,
+          manage_users: true,
+          manage_database: true,
+          define_permissions: true,
+          manage_organizations: true,
+          manage_google_integration: true
+        },
+        dashboard: {
+          view_dashboard: true
+        },
+        administration: {
+          manage_connections: true,
+          manage_accounts: true,
+          manage_users: true,
+          manage_departments: true,
+          manage_teams: true
+        },
+        automation: {
+          use_ai_assistant: true,
+          access_ai_playground: true,
+          manage_flows: true,
+          configure_prompts: true,
+          manage_ai_credits: true,
+          manage_scheduling: true
+        },
+        marketplace: {
+          access_marketplace: true,
+          configure_integrations: true
+        },
+        support: {
+          access_support: true
+        }
+      };
+      
+      const { data: updatedRole, error: updateError } = await supabaseAdmin
+        .from('roles')
+        .update({ permissions: updatedPermissions })
+        .eq('id', existingRole.id)
+        .select()
+        .single();
+      
+      if (updateError) {
+        console.warn(`   ⚠️ Aviso: Não foi possível atualizar permissões: ${updateError.message}`);
+        return existingRole;
+      }
+      
+      return updatedRole;
+    }
+    
+    return existingRole;
   }
 
   // Criar role de Super Admin
   console.log(`   Criando role "Super Admin"...`);
+  // ✅ CORREÇÃO: Estrutura de permissões correta conforme esperado pelo backend
   const adminPermissions = {
     chat: true,
     users: true,
     settings: true,
     analytics: true,
     organizations: true,
-    all: true
+    all: true,
+    // ✅ ADICIONADO: Permissões avançadas com estrutura correta
+    advanced_settings: {
+      access_logs: true,
+      manage_users: true,
+      manage_database: true,
+      define_permissions: true,
+      manage_organizations: true,
+      manage_google_integration: true
+    },
+    dashboard: {
+      view_dashboard: true
+    },
+    administration: {
+      manage_connections: true,
+      manage_accounts: true,
+      manage_users: true,
+      manage_departments: true,
+      manage_teams: true
+    },
+    automation: {
+      use_ai_assistant: true,
+      access_ai_playground: true,
+      manage_flows: true,
+      configure_prompts: true,
+      manage_ai_credits: true,
+      manage_scheduling: true
+    },
+    marketplace: {
+      access_marketplace: true,
+      configure_integrations: true
+    },
+    support: {
+      access_support: true
+    }
   };
 
   const { data: newRole, error: createError } = await supabaseAdmin
