@@ -320,10 +320,47 @@ router.patch('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Usuário não encontrado' });
     }
     
+    // ✅ CORREÇÃO: Buscar role do usuário atual do banco (não confiar em header)
+    const currentUserId = req.user?.id;
+    let currentUserRole = null;
+    
+    if (currentUserId) {
+      currentUserRole = await getUserRoleName(currentUserId);
+      // Normalizar role para comparação
+      if (currentUserRole) {
+        const roleMapping = {
+          'Super Admin': 'super_admin',
+          'Admin': 'admin',
+          'Administrador': 'admin',
+          'Manager': 'manager',
+          'Agente': 'agent',
+          'Agent': 'agent'
+        };
+        currentUserRole = roleMapping[currentUserRole] || currentUserRole.toLowerCase();
+      }
+    }
+    
+    // ✅ CORREÇÃO: Verificar se o usuário sendo editado é Super Admin
+    const { data: existingUserRole, error: existingRoleError } = await supabase
+      .from('profiles')
+      .select('role_id, roles!inner(name)')
+      .eq('id', id)
+      .single();
+    
+    if (!existingRoleError && existingUserRole?.roles) {
+      const existingRoleName = existingUserRole.roles.name?.toLowerCase();
+      const isExistingUserSuperAdmin = existingRoleName?.includes('super') || existingRoleName?.includes('super_admin');
+      
+      // Admins não podem editar Super Admins
+      if (currentUserRole === 'admin' && isExistingUserSuperAdmin) {
+        return res.status(403).json({ 
+          error: 'Admins não podem editar usuários com permissões de Super Admin.' 
+        });
+      }
+    }
+    
     // Validar hierarquia se role_id está sendo alterado
     if (role_id !== undefined) {
-      const currentUserRole = req.headers['x-user-role'];
-      
       const { data: targetRole, error: targetRoleError } = await supabase
         .from('roles')
         .select('name')
@@ -513,18 +550,19 @@ router.post('/invite', async (req, res) => {
 
       if (!targetRoleError && targetRole) {
         const targetRoleName = targetRole.name?.toLowerCase();
+        const isTargetSuperAdmin = targetRoleName?.includes('super') || targetRoleName === 'super admin';
         
-                 // Agentes não podem criar nenhum usuário
-         if (currentUserRole === 'agent') {
-           console.log('❌ [API] POST /users/invite - Agente tentando criar usuário');
-           return res.status(403).json({ 
-             error: 'Agentes não têm permissão para criar usuários.' 
-           });
-         }
+        // Agentes não podem criar nenhum usuário
+        if (currentUserRole === 'agent') {
+          console.log('❌ [API] POST /users/invite - Agente tentando criar usuário');
+          return res.status(403).json({ 
+            error: 'Agentes não têm permissão para criar usuários.' 
+          });
+        }
         
-        // Admins não podem criar super admins
-        if (currentUserRole === 'admin' && 
-            (targetRoleName?.includes('super') || targetRoleName?.includes('super_admin'))) {
+        // ✅ CORREÇÃO: Admins não podem criar super admins (comparação mais robusta)
+        if (currentUserRole === 'admin' && isTargetSuperAdmin) {
+          console.log('❌ [API] POST /users/invite - Admin tentando criar Super Admin');
           return res.status(403).json({ 
             error: 'Admins não podem criar usuários com permissões de Super Admin.' 
           });
@@ -685,6 +723,51 @@ router.delete('/:userId', async (req, res) => {
   }
 
   try {
+    // ✅ CORREÇÃO: Verificar hierarquia antes de excluir
+    const currentUserId = req.user?.id;
+    let currentUserRole = null;
+    
+    if (currentUserId) {
+      currentUserRole = await getUserRoleName(currentUserId);
+      // Normalizar role para comparação
+      if (currentUserRole) {
+        const roleMapping = {
+          'Super Admin': 'super_admin',
+          'Admin': 'admin',
+          'Administrador': 'admin',
+          'Manager': 'manager',
+          'Agente': 'agent',
+          'Agent': 'agent'
+        };
+        currentUserRole = roleMapping[currentUserRole] || currentUserRole.toLowerCase();
+      }
+    }
+    
+    // ✅ CORREÇÃO: Verificar se o usuário sendo excluído é Super Admin
+    const { data: userToDelete, error: userCheckError } = await supabase
+      .from('profiles')
+      .select('id, role_id, roles!inner(name)')
+      .eq('id', userId)
+      .single();
+    
+    if (!userCheckError && userToDelete?.roles) {
+      const targetRoleName = userToDelete.roles.name?.toLowerCase();
+      const isTargetSuperAdmin = targetRoleName?.includes('super') || targetRoleName?.includes('super_admin');
+      
+      // Admins não podem excluir Super Admins
+      if (currentUserRole === 'admin' && isTargetSuperAdmin) {
+        return res.status(403).json({ 
+          error: 'Admins não podem excluir usuários com permissões de Super Admin.' 
+        });
+      }
+      
+      // Não permitir auto-exclusão de Super Admin
+      if (currentUserId === userId && isTargetSuperAdmin) {
+        return res.status(403).json({ 
+          error: 'Super Admins não podem se excluir.' 
+        });
+      }
+    }
     
     // Passo 0: Excluir todos os convites relacionados ao usuário na tabela whatsapp_invites
     const { error: inviteError } = await supabase

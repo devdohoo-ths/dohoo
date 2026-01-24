@@ -182,6 +182,13 @@ router.get('/session', async (req, res) => {
         role_id: profile.role_id,
         role_name: profile.roles.name,
         role_permissions: profile.roles.permissions,
+        // ✅ ADICIONADO: Retornar objeto roles completo para compatibilidade com frontend
+        roles: {
+          id: profile.roles.id,
+          name: profile.roles.name,
+          description: profile.roles.description,
+          permissions: profile.roles.permissions
+        },
         organization: {
           id: profile.organizations.id,
           name: profile.organizations.name,
@@ -292,6 +299,13 @@ router.get('/profile', async (req, res) => {
         avatar_url: profile.avatar_url,
         role_name: profile.roles.name,
         role_permissions: profile.roles.permissions,
+        // ✅ ADICIONADO: Retornar objeto roles completo para compatibilidade com frontend
+        roles: {
+          id: profile.roles.id,
+          name: profile.roles.name,
+          description: profile.roles.description,
+          permissions: profile.roles.permissions
+        },
         organization: {
           id: profile.organizations.id,
           name: profile.organizations.name,

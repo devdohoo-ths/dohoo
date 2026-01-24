@@ -1,6 +1,8 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Edit, Mail, UserMinus, RotateCcw, Trash2, Link } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
+import { useRoles } from '@/hooks/useRoles';
 import { User, LoadingStates } from '../../types';
 
 interface UserActionsProps {
@@ -32,6 +34,23 @@ const UserActions: React.FC<UserActionsProps> = ({
   linkLoadingStates,
   deleteLoadingStates
 }) => {
+  const { profile } = useAuth();
+  const { roles } = useRoles();
+  
+  // ✅ Verificar se o usuário atual é Admin e o usuário alvo é Super Admin
+  const currentUserRole = roles.find(r => r.id === profile?.role_id);
+  const targetUserRole = roles.find(r => r.id === user.role_id);
+  
+  const currentUserRoleName = currentUserRole?.name?.toLowerCase() || '';
+  const targetUserRoleName = targetUserRole?.name?.toLowerCase() || '';
+  
+  const isCurrentUserAdmin = currentUserRoleName.includes('admin') && !currentUserRoleName.includes('super');
+  const isTargetSuperAdmin = targetUserRoleName.includes('super') || targetUserRoleName.includes('super_admin');
+  
+  // Admin não pode editar/excluir Super Admin
+  const canEdit = !(isCurrentUserAdmin && isTargetSuperAdmin);
+  const canDelete = !(isCurrentUserAdmin && isTargetSuperAdmin);
+  
   if (isActive) {
     // Ações para usuários ativos
     return (
@@ -41,7 +60,8 @@ const UserActions: React.FC<UserActionsProps> = ({
           size="sm" 
           variant="outline" 
           onClick={onEdit} 
-          title="Editar usuário"
+          disabled={!canEdit}
+          title={!canEdit ? 'Admins não podem editar Super Admins' : 'Editar usuário'}
           className="h-6 w-6 sm:h-8 sm:w-8 p-0"
         >
           <Edit className="w-3 h-3 sm:w-4 sm:h-4" />
@@ -84,8 +104,8 @@ const UserActions: React.FC<UserActionsProps> = ({
           size="sm" 
           variant="outline" 
           onClick={onDelete} 
-          disabled={deleteLoadingStates[user.id]}
-          title="Desativar usuário"
+          disabled={deleteLoadingStates[user.id] || !canDelete}
+          title={!canDelete ? 'Admins não podem excluir Super Admins' : 'Desativar usuário'}
           className="border-orange-300 text-orange-600 hover:bg-orange-50 h-6 w-6 sm:h-8 sm:w-8 p-0"
         >
           {deleteLoadingStates[user.id] ? (
@@ -121,8 +141,8 @@ const UserActions: React.FC<UserActionsProps> = ({
           size="sm" 
           variant="destructive" 
           onClick={onHardDelete} 
-          disabled={loadingStates[user.id]}
-          title="Excluir permanentemente"
+          disabled={loadingStates[user.id] || !canDelete}
+          title={!canDelete ? 'Admins não podem excluir Super Admins' : 'Excluir permanentemente'}
           className="h-6 w-6 sm:h-8 sm:w-8 p-0"
         >
           {loadingStates[user.id] ? (

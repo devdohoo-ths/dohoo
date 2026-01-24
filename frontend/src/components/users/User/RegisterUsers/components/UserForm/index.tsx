@@ -50,6 +50,19 @@ const UserForm: React.FC<UserFormProps> = ({
   const { profile } = useAuth();
   
   const availableRoles = getAvailableRoles(roles, profile?.role_id);
+  
+  // ✅ Verificar se o usuário sendo editado é Super Admin e o usuário atual é apenas Admin
+  const currentUserRole = roles.find(r => r.id === profile?.role_id);
+  const targetUserRole = roles.find(r => r.id === editUser?.role_id);
+  
+  const currentUserRoleName = currentUserRole?.name?.toLowerCase() || '';
+  const targetUserRoleName = targetUserRole?.name?.toLowerCase() || '';
+  
+  const isCurrentUserAdmin = currentUserRoleName.includes('admin') && !currentUserRoleName.includes('super');
+  const isTargetSuperAdmin = targetUserRoleName.includes('super') || targetUserRoleName.includes('super_admin');
+  
+  // Se Admin está editando Super Admin, não permitir alterar role
+  const canChangeRole = !(editUser && isCurrentUserAdmin && isTargetSuperAdmin);
 
   const handleSelectChange = (name: string, value: string) => {
     onFormChange({ target: { name, value } } as any);
@@ -113,6 +126,7 @@ const UserForm: React.FC<UserFormProps> = ({
               <Select 
                 value={form.role_id} 
                 onValueChange={(value) => handleSelectChange('role_id', value)}
+                disabled={!canChangeRole}
               >
                 <SelectTrigger className="mt-1">
                   <SelectValue placeholder="Selecione o nível de acesso" />
