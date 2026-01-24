@@ -41,11 +41,9 @@ export const usePermissions = () => {
       return false;
     }
     
-    // ✅ CORREÇÃO: Super admin usando estrutura correta - roles.name (não profile.role_name)
-    const currentRole = roles.find(r => r.id === profile.role_id);
-    if (currentRole?.name?.toLowerCase().includes('super admin')) {
-      return true;
-    }
+    // ✅ REMOVIDO: Verificação fixa de Super Admin
+    // ✅ Super Admin agora é apenas uma role no banco, sem tratamento especial
+    // ✅ As permissões do Super Admin devem estar configuradas no banco de dados
     
     // Se ainda não foi inicializado, retorna false (modo conservador)
     if (!initialized) {
@@ -123,54 +121,8 @@ export const usePermissions = () => {
       setError(null);
       fetchRef.current = true;
 
-      // ✅ CORREÇÃO: Super admin tem todas as permissões automaticamente
-      const currentRole = roles.find(r => r.id === profile.role_id);
-      if (currentRole?.name?.toLowerCase().includes('super admin')) {
-        const superAdminPermissions: UserPermissions = {
-          chat: true,
-          ai: true,
-          accounts: true,
-          settings: true,
-          analytics: true,
-          users: true,
-          administration: true,
-          dashboard: true,
-          automation: true,
-          marketplace: true,
-          advanced_settings: true,
-          support: true,
-          // Permissões específicas
-          view_chat: true,
-          manage_users: true,
-          manage_accounts: true,
-          manage_departments: true,
-          manage_connections: true,
-          manage_teams: true,
-          use_ai_assistant: true,
-          manage_flows: true,
-          configure_prompts: true,
-          access_ai_playground: true,
-          manage_ai_credits: true,
-          manage_agent_limits: true,
-          manage_scheduling: true,
-          view_attendance_report: true,
-          view_conversation_report: true,
-          export_reports: true,
-          access_advanced_metrics: true,
-          manage_rules: true,
-          access_marketplace: true,
-          define_permissions: true,
-          manage_database: true,
-          manage_google_integration: true,
-          manage_organizations: true
-        };
-
-        setPermissions(superAdminPermissions);
-        setInitialized(true);
-        setLoading(false);
-        fetchRef.current = false;
-        return;
-      }
+      // ✅ REMOVIDO: Código fixo de Super Admin - agora tudo vem do banco
+      // ✅ As permissões do Super Admin devem estar configuradas no banco de dados
 
       // ✅ CORREÇÃO: Para outros roles, usar as permissões da role
       if (profile.role_permissions && typeof profile.role_permissions === 'object') {

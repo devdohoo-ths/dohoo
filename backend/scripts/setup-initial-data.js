@@ -18,6 +18,7 @@
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
+import { createFullPermissions } from '../config/permissionModules.js';
 import { dirname, join } from 'path';
 import { randomUUID } from 'crypto';
 
@@ -220,51 +221,13 @@ async function getOrCreateAdminRole(organizationId) {
     return existingRole;
   }
 
-  // Criar role de Super Admin
+  // ✅ NOVO: Criar role de Super Admin com todas as permissões da configuração
   console.log(`   Criando role "Super Admin"...`);
-  // ✅ CORREÇÃO: Estrutura de permissões correta conforme esperado pelo backend
-  const adminPermissions = {
-    chat: true,
-    users: true,
-    settings: true,
-    analytics: true,
-    organizations: true,
-    all: true,
-    // ✅ ADICIONADO: Permissões avançadas com estrutura correta
-    advanced_settings: {
-      access_logs: true,
-      manage_users: true,
-      manage_database: true,
-      define_permissions: true,
-      manage_organizations: true,
-      manage_google_integration: true
-    },
-    dashboard: {
-      view_dashboard: true
-    },
-    administration: {
-      manage_connections: true,
-      manage_accounts: true,
-      manage_users: true,
-      manage_departments: true,
-      manage_teams: true
-    },
-    automation: {
-      use_ai_assistant: true,
-      access_ai_playground: true,
-      manage_flows: true,
-      configure_prompts: true,
-      manage_ai_credits: true,
-      manage_scheduling: true
-    },
-    marketplace: {
-      access_marketplace: true,
-      configure_integrations: true
-    },
-    support: {
-      access_support: true
-    }
-  };
+  
+  // ✅ Criar estrutura de permissões com todas as permissões ativadas
+  const adminPermissions = createFullPermissions();
+  
+  console.log(`   ✅ Permissões do Super Admin configuradas: ${Object.keys(adminPermissions).length} módulos`);
 
   const { data: newRole, error: createError } = await supabaseAdmin
     .from('roles')

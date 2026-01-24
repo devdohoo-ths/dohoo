@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,7 +38,9 @@ import {
   LifeBuoy,
   Crown,
   UserCheck,
-  Trophy
+  Trophy,
+  Eye,
+  Phone
 } from 'lucide-react';
 import { apiBase, getAuthHeadersWithUser } from '@/utils/apiBase';
 import { useOrganization } from '@/hooks/useOrganization';
@@ -83,6 +85,12 @@ const PermissionsManager: React.FC = () => {
   const [roleToDelete, setRoleToDelete] = useState<Role | null>(null);
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
+  
+  // ✅ REFs para evitar múltiplas chamadas
+  const hasFetchedRef = useRef(false);
+  const isFetchingRef = useRef(false);
+  const modulesFetchedRef = useRef(false);
+  const defaultRolesFetchedRef = useRef(false);
 
   // Estados do formulário de role
   const [roleForm, setRoleForm] = useState({
@@ -163,16 +171,12 @@ const PermissionsManager: React.FC = () => {
     return ['super_admin', 'admin'].includes(userLevel);
   }, [userLevel]);
 
-  useEffect(() => {
-    if (canAccessPage === true) { // Só carregar se for true (não null)
-      fetchRoles();
-      fetchModules();
-      fetchDefaultRoles();
-    }
-  }, [canAccessPage]);
-
-  const fetchRoles = async () => {
+  // ✅ MEMOIZAR funções de fetch para evitar recriações
+  const fetchRoles = useCallback(async () => {
+    if (isFetchingRef.current) return; // Evitar chamadas simultâneas
+    
     try {
+      isFetchingRef.current = true;
       setLoading(true);
       const headers = await getAuthHeadersWithUser(user, profile);
       const response = await fetch(`${apiBase}/api/permissions/roles`, {
@@ -187,11 +191,16 @@ const PermissionsManager: React.FC = () => {
       setError('Erro ao carregar roles');
     } finally {
       setLoading(false);
+      isFetchingRef.current = false;
     }
-  };
+  }, [user, profile]);
 
-  const fetchModules = async () => {
+  const fetchModules = useCallback(async () => {
+    // ✅ Módulos são estáticos, só buscar uma vez
+    if (modulesFetchedRef.current) return;
+    
     try {
+      modulesFetchedRef.current = true;
       const headers = await getAuthHeadersWithUser(user, profile);
       const response = await fetch(`${apiBase}/api/permissions/modules`, {
         headers
@@ -202,11 +211,16 @@ const PermissionsManager: React.FC = () => {
       }
     } catch (error) {
       console.error('Erro ao buscar módulos:', error);
+      modulesFetchedRef.current = false; // Resetar em caso de erro
     }
-  };
+  }, [user, profile]);
 
-  const fetchDefaultRoles = async () => {
+  const fetchDefaultRoles = useCallback(async () => {
+    // ✅ Default roles raramente mudam, só buscar uma vez
+    if (defaultRolesFetchedRef.current) return;
+    
     try {
+      defaultRolesFetchedRef.current = true;
       const headers = await getAuthHeadersWithUser(user, profile);
       const response = await fetch(`${apiBase}/api/permissions/default-roles`, {
         headers
@@ -217,8 +231,25 @@ const PermissionsManager: React.FC = () => {
       }
     } catch (error) {
       console.error('Erro ao buscar roles padrão:', error);
+      defaultRolesFetchedRef.current = false; // Resetar em caso de erro
     }
-  };
+  }, [user, profile]);
+
+  // ✅ useEffect otimizado - só executa uma vez quando canAccessPage vira true
+  useEffect(() => {
+    if (canAccessPage === true && !hasFetchedRef.current && !isFetchingRef.current) {
+      hasFetchedRef.current = true;
+      // ✅ Executar em paralelo para ser mais rápido
+      Promise.all([
+        fetchRoles(),
+        fetchModules(),
+        fetchDefaultRoles()
+      ]).catch(error => {
+        console.error('Erro ao carregar dados iniciais:', error);
+        hasFetchedRef.current = false; // Resetar em caso de erro
+      });
+    }
+  }, [canAccessPage, fetchRoles, fetchModules, fetchDefaultRoles]);
 
   const openRoleModal = (role: Role | null = null) => {
     if (role) {
@@ -322,6 +353,8 @@ const PermissionsManager: React.FC = () => {
         setSuccess('Role excluída com sucesso!');
         setShowDeleteModal(false);
         setRoleToDelete(null);
+        // ✅ Resetar ref para permitir nova busca
+        hasFetchedRef.current = false;
         fetchRoles();
       } else {
         setError(data.error || 'Erro ao excluir role');
@@ -389,311 +422,71 @@ const PermissionsManager: React.FC = () => {
     return enabledCount > 0 && enabledCount < allPermissions.length;
   };
 
-  // Estrutura das permissões baseada no modelo do banco
-  const permissionSections = [
-    {
-      key: 'dashboard',
-      name: 'Dashboard',
-      description: 'Acesso ao painel principal',
-      icon: Home,
-      color: 'bg-blue-100 text-blue-600',
-      emoji: '📊',
-      permissions: {
-        view_dashboard: {
-          name: 'Acesso ao Dashboard',
-          description: 'Pode visualizar o painel principal'
-        }
-      }
-    },
-    {
-      key: 'contacts',
-      name: 'Contatos',
-      description: 'Acesso à gestão de contatos',
-      icon: Users,
-      color: 'bg-emerald-100 text-emerald-600',
-      emoji: '👥',
-      permissions: {
-        access_contacts: {
-          name: 'Acessar Contatos',
-          description: 'Pode acessar a tela de contatos'
-        }
-      }
-    },
-    {
-      key: 'chat',
-      name: 'Chat',
-      description: 'Gerenciamento de conversas e mensagens',
-      icon: MessageCircle,
-      color: 'bg-green-100 text-green-600',
-      emoji: '💬',
-      permissions: {
-        view_chat: {
-          name: 'Visualizar Chat',
-          description: 'Pode visualizar o chat'
-        },
-        view_history: {
-          name: 'Acessar Histórico',
-          description: 'Pode visualizar histórico de conversas'
-        },
-        send_messages: {
-          name: 'Enviar Mensagens',
-          description: 'Pode enviar mensagens para contatos'
-        },
-        reply_messages: {
-          name: 'Responder Mensagens',
-          description: 'Pode responder mensagens recebidas'
-        },
-        manage_conversations: {
-          name: 'Gerenciar Conversas',
-          description: 'Pode arquivar, marcar como lida, etc.'
-        },
-        configure_automations: {
-          name: 'Configurar Automações',
-          description: 'Pode criar e editar automações de chat'
-        }
-      }
-    },
-    {
-      key: 'support',
-      name: 'Suporte',
-      description: 'Acesso ao suporte',
-      icon: LifeBuoy,
-      color: 'bg-teal-100 text-teal-600',
-      emoji: '🆘',
-      permissions: {
-        access_support: {
-          name: 'Acessar Suporte',
-          description: 'Pode acessar o sistema de suporte'
-        }
-      }
-    },
-    {
-      key: 'analytics',
-      name: 'Analytics & Relatórios',
-      description: 'Relatórios e análises de dados',
-      icon: BarChart3,
-      color: 'bg-orange-100 text-orange-600',
-      emoji: '📈',
-      permissions: {
-        manage_rules: {
-          name: 'Gerenciar Regras',
-          description: 'Pode gerenciar regras de relatórios'
-        },
-        view_attendance_report: {
-          name: 'Relatório de Atendimento',
-          description: 'Pode visualizar relatório de atendimento'
-        },
-        view_conversation_report: {
-          name: 'Relatório de Conversas',
-          description: 'Pode visualizar relatório de conversas'
-        }
-      }
-    },
-    {
-      key: 'productivity',
-      name: 'Produtividade',
-      description: 'Relatórios e métricas de produtividade',
-      icon: CheckCircleIcon,
-      color: 'bg-lime-100 text-lime-600',
-      emoji: '⏱️',
-      permissions: {
-        access_productivity: {
-          name: 'Acessar Produtividade',
-          description: 'Pode acessar a tela de produtividade'
-        }
-      }
-    },
-    {
-      key: 'ranking',
-      name: 'Ranking',
-      description: 'Acesso ao ranking gamificado',
-      icon: Trophy,
-      color: 'bg-yellow-100 text-yellow-700',
-      emoji: '🏆',
-      permissions: {
-        access_ranking: {
-          name: 'Acessar Ranking',
-          description: 'Pode acessar o ranking'
-        }
-      }
-    },
-    {
-      key: 'campaigns',
-      name: 'Campanhas',
-      description: 'Acesso às campanhas inteligentes',
-      icon: Zap,
-      color: 'bg-pink-100 text-pink-600',
-      emoji: '📣',
-      permissions: {
-        access_campaigns: {
-          name: 'Acessar Campanhas',
-          description: 'Pode acessar campanhas inteligentes'
-        }
-      }
-    },
-    {
-      key: 'automation',
-      name: 'Automação',
-      description: 'Funcionalidades de inteligência artificial',
-      icon: Brain,
-      color: 'bg-purple-100 text-purple-600',
-      emoji: '🤖',
-      permissions: {
-        manage_flows: {
-          name: 'Gerenciar Fluxos',
-          description: 'Pode criar e gerenciar fluxos de automação'
-        },
-        use_ai_assistant: {
-          name: 'Usar Assistente IA',
-          description: 'Pode usar o assistente de IA'
-        },
-        configure_prompts: {
-          name: 'Configurar Prompts',
-          description: 'Pode configurar prompts de IA'
-        },
-        manage_ai_credits: {
-          name: 'Gerenciar Créditos',
-          description: 'Pode gerenciar créditos de IA'
-        },
-        manage_scheduling: {
-          name: 'Gerenciar Agendamento',
-          description: 'Pode configurar agendamentos'
-        },
-        manage_agent_limits: {
-          name: 'Gerenciar Limites de Agentes',
-          description: 'Pode gerenciar limites de agentes'
-        },
-        access_ai_playground: {
-          name: 'Acessar Playground',
-          description: 'Pode acessar o playground de IA'
-        }
-      }
-    },
-    {
-      key: 'marketplace',
-      name: 'Marketplace',
-      description: 'Configurações de integrações',
-      icon: Store,
-      color: 'bg-indigo-100 text-indigo-600',
-      emoji: '🛒',
-      permissions: {
-        access_marketplace: {
-          name: 'Acessar Marketplace',
-          description: 'Pode acessar o marketplace'
-        },
-        configure_integrations: {
-          name: 'Configurar Integrações',
-          description: 'Pode configurar integrações'
-        }
-      }
-    },
-    {
-      key: 'intelligent_service',
-      name: 'Atendimento Inteligente',
-      description: 'Módulo de atendimento automatizado com flows, times e chat',
-      icon: Brain,
-      color: 'bg-purple-100 text-purple-600',
-      emoji: '🧠',
-      permissions: {
-        view_intelligent_service: {
-          name: 'Visualizar Dashboard',
-          description: 'Pode visualizar o dashboard do Atendimento Inteligente'
-        },
-        manage_intelligent_service: {
-          name: 'Gerenciar Módulo',
-          description: 'Pode gerenciar o módulo completo'
-        },
-        manage_products: {
-          name: 'Gerenciar Produtos',
-          description: 'Pode criar, editar e deletar produtos de atendimento'
-        },
-        configure_flows: {
-          name: 'Configurar Fluxos',
-          description: 'Pode configurar fluxos de atendimento'
-        },
-        configure_team_strategies: {
-          name: 'Configurar Estratégias de Time',
-          description: 'Pode configurar estratégias de distribuição'
-        },
-        configure_chat_interface: {
-          name: 'Configurar Interface de Chat',
-          description: 'Pode configurar chat interno e externo'
-        },
-        view_metrics: {
-          name: 'Visualizar Métricas',
-          description: 'Pode visualizar métricas de performance'
-        },
-        export_data: {
-          name: 'Exportar Dados',
-          description: 'Pode exportar dados e relatórios'
-        }
-      }
-    },
-    {
-      key: 'administration',
-      name: 'Administração',
-      description: 'Configurações administrativas do sistema',
-      icon: Building2,
-      color: 'bg-red-100 text-red-600',
-      emoji: '⚙️',
-      permissions: {
-        manage_teams: {
-          name: 'Gerenciar Times',
-          description: 'Pode gerenciar times'
-        },
-        manage_users: {
-          name: 'Cadastrar Usuários',
-          description: 'Pode cadastrar novos usuários'
-        },
-        manage_accounts: {
-          name: 'Gerenciar Contas WhatsApp',
-          description: 'Pode gerenciar contas do WhatsApp'
-        },
-        manage_connections: {
-          name: 'Gerenciar Conexões',
-          description: 'Pode gerenciar conexões do sistema'
-        },
-        manage_departments: {
-          name: 'Gerenciar Departamentos',
-          description: 'Pode gerenciar departamentos'
-        }
-      }
-    },
-    {
-      key: 'advanced_settings',
-      name: 'Configurações Avançadas',
-      description: 'Configurações avançadas do sistema',
-      icon: Settings,
-      color: 'bg-gray-100 text-gray-600',
-      emoji: '🔧',
-      permissions: {
-        access_logs: {
-          name: 'Acessar Logs',
-          description: 'Pode acessar logs do sistema'
-        },
-        manage_users: {
-          name: 'Gerenciar Usuários',
-          description: 'Pode gerenciar usuários do sistema'
-        },
-        manage_database: {
-          name: 'Gerenciar Bancos de Dados',
-          description: 'Pode gerenciar bancos de dados'
-        },
-        define_permissions: {
-          name: 'Definir Permissões',
-          description: 'Pode definir permissões do sistema'
-        },
-        manage_organizations: {
-          name: 'Gerenciar Organizações',
-          description: 'Pode gerenciar organizações'
-        },
-        manage_google_integration: {
-          name: 'Gerenciar Integração Google',
-          description: 'Pode gerenciar integração com Google'
-        }
-      }
-    }
-  ];
+  // ✅ NOVO: Estrutura das permissões baseada nos dados do banco (módulos do menu)
+  // ✅ Os módulos vêm do endpoint /api/permissions/modules que busca do banco
+  const permissionSections = useMemo(() => {
+    // Converter módulos do banco para o formato esperado pelo componente
+    return Object.entries(modules).map(([moduleKey, moduleData]) => {
+      // Mapear ícones baseado no icon_name do banco
+      const iconMap: Record<string, any> = {
+        'Home': Home,
+        'Building2': Building2,
+        'Zap': Zap,
+        'MessageCircle': MessageCircle,
+        'Eye': Eye,
+        'Phone': Phone,
+        'BarChart3': BarChart3,
+        'AlertCircle': AlertCircle,
+        'Settings': Settings
+      };
+      
+      const ModuleIcon = iconMap[moduleData.icon_name] || Settings;
+      
+      // Mapear cores baseado no módulo
+      const colorMap: Record<string, string> = {
+        'dashboard': 'bg-blue-100 text-blue-600',
+        'administration': 'bg-red-100 text-red-600',
+        'automation': 'bg-purple-100 text-purple-600',
+        'chat': 'bg-green-100 text-green-600',
+        'supervisor-virtual': 'bg-indigo-100 text-indigo-600',
+        'cdr': 'bg-teal-100 text-teal-600',
+        'campanhas': 'bg-pink-100 text-pink-600',
+        'analytics': 'bg-orange-100 text-orange-600',
+        'rules': 'bg-yellow-100 text-yellow-600',
+        'advanced': 'bg-gray-100 text-gray-600'
+      };
+      
+      // Mapear emojis baseado no módulo
+      const emojiMap: Record<string, string> = {
+        'dashboard': '📊',
+        'administration': '⚙️',
+        'automation': '🤖',
+        'chat': '💬',
+        'supervisor-virtual': '👁️',
+        'cdr': '📞',
+        'campanhas': '📣',
+        'analytics': '📈',
+        'rules': '⚠️',
+        'advanced': '🔧'
+      };
+      
+      return {
+        key: moduleKey,
+        name: moduleData.name,
+        description: moduleData.description,
+        icon: ModuleIcon,
+        color: colorMap[moduleKey] || 'bg-gray-100 text-gray-600',
+        emoji: emojiMap[moduleKey] || '📋',
+        permissions: moduleData.permissions || {}
+      };
+    }).sort((a, b) => {
+      // Ordenar baseado na ordem do menu (mesma ordem do Sidebar)
+      const order = ['dashboard', 'administration', 'automation', 'chat', 'supervisor-virtual', 'cdr', 'campanhas', 'analytics', 'rules', 'advanced'];
+      const indexA = order.indexOf(a.key);
+      const indexB = order.indexOf(b.key);
+      return (indexA === -1 ? 999 : indexA) - (indexB === -1 ? 999 : indexB);
+    });
+  }, [modules]);
 
   // 🎯 RENDERIZAR LOADING ENQUANTO CARREGA DADOS DO USUÁRIO
   if (!isUserDataLoaded) {
@@ -968,7 +761,7 @@ const PermissionsManager: React.FC = () => {
               <p className="text-sm text-muted-foreground mb-4">Configure as permissões de acesso para esta role</p>
               
               <div className="space-y-6">
-                {permissionSections.map((section) => (
+                {(permissionSections.length > 0 ? permissionSections : []).map((section) => (
                   <div key={section.key} className="border rounded-lg p-4">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">

@@ -2,6 +2,7 @@ import express from 'express';
 import { randomUUID } from 'crypto';
 import { supabase } from '../lib/supabaseClient.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { PERMISSION_MODULES } from '../config/permissionModules.js';
 
 const router = express.Router();
 
@@ -408,125 +409,15 @@ router.delete('/roles/:id', async (req, res) => {
   }
 });
 
-// GET /api/permissions/modules - Obter módulos e permissões disponíveis
+// GET /api/permissions/modules - Obter módulos e permissões disponíveis (da constante)
 router.get('/modules', async (req, res) => {
   try {
-    console.log('🔐 [API] Buscando módulos e permissões');
+    console.log('🔐 [API] Buscando módulos e permissões da configuração');
     
-    // Estrutura de módulos e permissões - compatível com o frontend
-    const modules = {
-      dashboard: {
-        name: 'Dashboard',
-        description: 'Acesso ao painel principal',
-        permissions: {
-          view_dashboard: { name: 'Acesso ao Dashboard', description: 'Pode visualizar o painel principal' }
-        }
-      },
-      contacts: {
-        name: 'Contatos',
-        description: 'Acesso à gestão de contatos',
-        permissions: {
-          access_contacts: { name: 'Acessar Contatos', description: 'Pode acessar a tela de contatos' }
-        }
-      },
-      administration: {
-        name: 'Administração',
-        description: 'Configurações administrativas do sistema',
-        permissions: {
-          manage_connections: { name: 'Gerenciar Contas', description: 'Pode gerenciar contas do sistema' },
-          manage_accounts: { name: 'Gerenciar Contas WhatsApp', description: 'Pode gerenciar contas do WhatsApp' },
-          manage_users: { name: 'Cadastrar Usuários', description: 'Pode cadastrar novos usuários' },
-          manage_departments: { name: 'Gerenciar Departamentos', description: 'Pode gerenciar departamentos' },
-          manage_teams: { name: 'Gerenciar Times', description: 'Pode gerenciar times' }
-        }
-      },
-      chat: {
-        name: 'Chat',
-        description: 'Gerenciamento de conversas e mensagens',
-        permissions: {
-          view_chat: { name: 'Visualizar Chat', description: 'Pode visualizar o chat' },
-          send_messages: { name: 'Enviar Mensagens', description: 'Pode enviar mensagens para contatos' },
-          reply_messages: { name: 'Responder Mensagens', description: 'Pode responder mensagens recebidas' },
-          manage_conversations: { name: 'Gerenciar Conversas', description: 'Pode arquivar, marcar como lida, etc.' },
-          view_history: { name: 'Acessar Histórico', description: 'Pode visualizar histórico de conversas' },
-          configure_automations: { name: 'Configurar Automações', description: 'Pode criar e editar automações de chat' }
-        }
-      },
-      automation: {
-        name: 'Automação',
-        description: 'Funcionalidades de inteligência artificial',
-        permissions: {
-          use_ai_assistant: { name: 'Usar Assistente IA', description: 'Pode usar o assistente de IA' },
-          access_ai_playground: { name: 'Acessar Playground', description: 'Pode acessar o playground de IA' },
-          manage_flows: { name: 'Gerenciar Fluxos', description: 'Pode criar e gerenciar fluxos de automação' },
-          configure_prompts: { name: 'Configurar Prompts', description: 'Pode configurar prompts de IA' },
-          manage_ai_credits: { name: 'Gerenciar Créditos', description: 'Pode gerenciar créditos de IA' },
-          manage_scheduling: { name: 'Gerenciar Agendamento', description: 'Pode configurar agendamentos' }
-        }
-      },
-      productivity: {
-        name: 'Produtividade',
-        description: 'Relatórios e métricas de produtividade',
-        permissions: {
-          access_productivity: { name: 'Acessar Produtividade', description: 'Pode acessar a tela de produtividade' }
-        }
-      },
-      ranking: {
-        name: 'Ranking',
-        description: 'Acesso ao ranking gamificado',
-        permissions: {
-          access_ranking: { name: 'Acessar Ranking', description: 'Pode acessar o ranking' }
-        }
-      },
-      campaigns: {
-        name: 'Campanhas',
-        description: 'Acesso às campanhas inteligentes',
-        permissions: {
-          access_campaigns: { name: 'Acessar Campanhas', description: 'Pode acessar campanhas inteligentes' }
-        }
-      },
-      analytics: {
-        name: 'Analytics & Relatórios',
-        description: 'Relatórios e análises de dados',
-        permissions: {
-          view_dashboard: { name: 'Visualizar Dashboard', description: 'Pode visualizar relatórios' },
-          export_reports: { name: 'Exportar Relatórios', description: 'Pode exportar relatórios' },
-          access_advanced_metrics: { name: 'Métricas Avançadas', description: 'Pode acessar métricas avançadas' },
-          manage_rules: { name: 'Gerenciar Regras', description: 'Pode gerenciar regras de relatórios' }
-        }
-      },
-      marketplace: {
-        name: 'Marketplace',
-        description: 'Configurações de integrações',
-        permissions: {
-          access_marketplace: { name: 'Acessar Marketplace', description: 'Pode acessar o marketplace' },
-          configure_integrations: { name: 'Configurar Integrações', description: 'Pode configurar integrações' }
-        }
-      },
-      advanced_settings: {
-        name: 'Configurações Avançadas',
-        description: 'Configurações avançadas do sistema',
-        permissions: {
-          access_logs: { name: 'Acessar Logs', description: 'Pode acessar logs do sistema' },
-          manage_users: { name: 'Gerenciar Usuários', description: 'Pode gerenciar usuários do sistema' },
-          manage_database: { name: 'Gerenciar Bancos de Dados', description: 'Pode gerenciar bancos de dados' },
-          define_permissions: { name: 'Definir Permissões', description: 'Pode definir permissões do sistema' },
-          manage_organizations: { name: 'Gerenciar Organizações', description: 'Pode gerenciar organizações' },
-          manage_google_integration: { name: 'Gerenciar Integração Google', description: 'Pode gerenciar integração com Google' }
-        }
-      },
-      support: {
-        name: 'Suporte',
-        description: 'Acesso ao suporte',
-        permissions: {
-          access_support: { name: 'Acessar Suporte', description: 'Pode acessar o sistema de suporte' }
-        }
-      }
-    };
-
+    // ✅ RETORNAR MÓDULOS DA CONSTANTE (nada fixo no frontend, tudo vem do backend)
     res.json({ 
       success: true,
-      modules 
+      modules: PERMISSION_MODULES
     });
 
   } catch (error) {
@@ -599,22 +490,9 @@ router.get('/user-permissions', async (req, res) => {
       }
     }
 
-    // Super admin tem todas as permissões como true
-    if (isSuperAdmin || req.user.user_role === 'super_admin') {
-      console.log('✅ [API] Super admin - todas as permissões concedidas');
-      permissions = {
-        dashboard: { view_dashboard: true },
-        administration: { manage_connections: true, manage_accounts: true, manage_users: true, manage_departments: true, manage_teams: true },
-        chat: { view_chat: true, send_messages: true, reply_messages: true, manage_conversations: true, view_history: true, configure_automations: true },
-        automation: { use_ai_assistant: true, access_ai_playground: true, manage_flows: true, configure_prompts: true, manage_ai_credits: true, manage_scheduling: true },
-        analytics: { view_dashboard: true, export_reports: true, access_advanced_metrics: true, manage_rules: true },
-        marketplace: { access_marketplace: true, configure_integrations: true },
-        advanced_settings: { manage_database: true, manage_google_integration: true, define_permissions: true },
-        support: { access_support: true }
-      };
-      role_name = 'Super Admin';
-      role_id = req.user.role_id;
-    } else {
+    // ✅ REMOVIDO: Código fixo de Super Admin - agora tudo vem do banco
+    // ✅ Se o usuário tem uma role, buscar permissões do banco
+    if (role_id) {
       // Buscar role_id do usuário
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
