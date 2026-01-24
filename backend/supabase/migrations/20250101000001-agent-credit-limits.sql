@@ -34,9 +34,8 @@ CREATE POLICY "Admins can view organization limits" ON public.agent_credit_limit
     ) AND
     EXISTS (
       SELECT 1 FROM profiles p
-      JOIN roles r ON p.role_id = r.id
       WHERE p.id = auth.uid() 
-      AND r.name IN ('Admin', 'Super Admin')
+      AND p.user_role IN ('admin', 'super_admin')
     )
   );
 
@@ -48,9 +47,8 @@ CREATE POLICY "Admins can manage organization limits" ON public.agent_credit_lim
     ) AND
     EXISTS (
       SELECT 1 FROM profiles p
-      JOIN roles r ON p.role_id = r.id
       WHERE p.id = auth.uid() 
-      AND r.name IN ('Admin', 'Super Admin')
+      AND p.user_role IN ('admin', 'super_admin')
     )
   );
 

@@ -57,8 +57,7 @@ CREATE INDEX IF NOT EXISTS idx_fluxos_user_id ON public.fluxos(user_id);
 CREATE INDEX IF NOT EXISTS idx_fluxos_ativo ON public.fluxos(ativo);
 CREATE INDEX IF NOT EXISTS idx_fluxos_canal ON public.fluxos(canal);
 
--- Adicionar constraint para garantir que apenas um fluxo ativo por organização e canal
-ALTER TABLE public.fluxos 
-ADD CONSTRAINT unique_active_flow_per_org_canal 
-UNIQUE (organization_id, canal, ativo) 
+-- Adicionar índice único parcial para garantir que apenas um fluxo ativo por organização e canal
+CREATE UNIQUE INDEX IF NOT EXISTS unique_active_flow_per_org_canal 
+ON public.fluxos(organization_id, canal) 
 WHERE ativo = true; 

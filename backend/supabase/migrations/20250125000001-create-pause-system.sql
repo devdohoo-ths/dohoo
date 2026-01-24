@@ -197,9 +197,8 @@ CREATE POLICY "Admins can manage pause types"
     organization_id IN (
       SELECT p.organization_id 
       FROM profiles p
-      LEFT JOIN roles r ON p.role_id = r.id
       WHERE p.id = auth.uid() 
-      AND r.name IN ('Admin', 'Super Admin', 'Owner')
+      AND p.user_role IN ('admin', 'super_admin')
     )
   );
 
@@ -211,9 +210,8 @@ CREATE POLICY "Users can view their own pause history"
     organization_id IN (
       SELECT p.organization_id 
       FROM profiles p
-      LEFT JOIN roles r ON p.role_id = r.id
       WHERE p.id = auth.uid() 
-      AND r.name IN ('Admin', 'Super Admin', 'Owner', 'Supervisor', 'Manager')
+      AND p.user_role IN ('admin', 'super_admin')
     )
   );
 

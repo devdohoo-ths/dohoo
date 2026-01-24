@@ -11,7 +11,8 @@
         "postinstall": "node -e \"try { import('@supabase/supabase-js').then(() => console.log('✅ Dependências verificadas')).catch(() => {}); } catch(e) {}\"",
         "install:clean": "npm run clean:modules && npm cache clean --force && npm install",
         "clean:modules": "node -e \"const fs=require('fs'),path=require('path');function rm(dir){try{fs.rmSync(dir,{recursive:true,force:true});}catch(e){}};rm('node_modules');try{fs.unlinkSync('package-lock.json');}catch(e){}\"",
-        "verify": "node -e \"import('@supabase/supabase-js').then(() => { console.log('✅ @supabase/supabase-js OK'); }).catch(e => { console.error('❌ Erro:', e.message); process.exit(1); })\""
+        "verify": "node -e \"import('@supabase/supabase-js').then(() => { console.log('✅ @supabase/supabase-js OK'); }).catch(e => { console.error('❌ Erro:', e.message); process.exit(1); })\"",
+        "schema:consolidate": "node scripts/consolidate-migrations.js"
     },
     "dependencies": {
         "@cacheable/node-cache": "^1.6.1",

@@ -37,9 +37,8 @@ CREATE POLICY "Admins can update organization credits" ON public.ai_credits
     ) AND
     EXISTS (
       SELECT 1 FROM profiles p
-      JOIN roles r ON p.role_id = r.id
       WHERE p.id = auth.uid() 
-      AND r.name IN ('Admin', 'Super Admin')
+      AND p.user_role IN ('admin', 'super_admin')
     )
   );
 

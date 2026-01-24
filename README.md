@@ -221,6 +221,52 @@ npm install
 
    **Após executar as migrações**, seu banco de dados estará pronto! ✅
 
+   #### Opção D: Script de Inicialização Automática (Recomendado após migrações)
+
+   **⚠️ IMPORTANTE:** Execute este script **APENAS APÓS** ter executado as migrações do banco de dados (Opções A, B ou C acima).
+
+   O script de inicialização garante que existe uma organização e um usuário admin padrão para acessar o sistema:
+
+   ```bash
+   cd backend
+   node scripts/setup-initial-data.js
+   ```
+
+   **O que o script faz:**
+   - ✅ Verifica se o banco de dados está configurado (tabelas existem)
+   - ✅ Cria uma organização padrão chamada "Organização Padrão" (se não existir)
+   - ✅ Cria uma role "Super Admin" com permissões totais (se não existir)
+   - ✅ Cria um usuário admin padrão no `auth.users` e `profiles` (se não existir)
+   - ✅ Associa o usuário admin à organização e role criadas
+
+   **Credenciais padrão criadas:**
+   - **Email:** `admin@dohoo.local`
+   - **Senha:** `Admin@123456`
+   - **Nome:** `Administrador`
+
+   > ⚠️ **IMPORTANTE:** Altere a senha padrão após o primeiro login por segurança!
+
+   **Personalizar credenciais padrão:**
+
+   Você pode personalizar as credenciais do admin padrão através de variáveis de ambiente no `.env` do backend:
+
+   ```env
+   DEFAULT_ADMIN_EMAIL=seu-email@exemplo.com
+   DEFAULT_ADMIN_PASSWORD=SuaSenhaSegura123
+   DEFAULT_ADMIN_NAME=Seu Nome
+   ```
+
+   Se não configurar essas variáveis, o script usará os valores padrão acima.
+
+   **Troubleshooting:**
+
+   Se você receber o erro `Could not find the table 'public.organizations' in the schema cache`:
+   - Isso significa que as migrações ainda não foram executadas
+   - Execute primeiro as migrações (Opção A, B ou C acima)
+   - Depois execute este script novamente
+
+   O script é **idempotente**: pode ser executado várias vezes sem criar duplicatas (ele verifica antes de criar).
+
 ---
 
 ## 🚀 Executando o Projeto

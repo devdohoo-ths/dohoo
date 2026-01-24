@@ -18,13 +18,13 @@ CREATE POLICY "Users can see their own organization"
   );
 
 -- Política para super admins verem todas as organizações (incluindo desativadas)
-CREATE POLICYSuper admins can see all organizations including deleted" 
+CREATE POLICY "Super admins can see all organizations including deleted" 
   ON public.organizations 
   FOR ALL 
   USING (
     EXISTS (
-      SELECT1OM public.profiles 
+      SELECT * FROM public.profiles 
       WHERE profiles.id = auth.uid() 
-      AND profiles.user_role =super_admin'
+      AND profiles.user_role = 'super_admin'
     )
   ); 
