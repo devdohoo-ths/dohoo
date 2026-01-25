@@ -31,6 +31,9 @@ export const useSupabaseChat = () => {
   // ✅ OTIMIZADO: Debounce ref declarado no topo para evitar problemas de inicialização
   const fetchChatsDebouncedRef = useRef<NodeJS.Timeout | null>(null);
   
+  // ✅ NOVO: Cache para verificação de propriedade do chat (evitar múltiplas requisições)
+  const chatOwnershipCacheRef = useRef<Map<string, { valid: boolean; timestamp: number }>>(new Map());
+  
   // ✅ CORREÇÃO: Refs para quebrar dependência circular com useRealtimeChat
   const markMessagesAsReadRef = useRef<((chatId: string) => Promise<void>) | null>(null);
   
@@ -199,31 +202,49 @@ export const useSupabaseChat = () => {
           // (mensagens próprias sempre devem ser exibidas)
           if (!message.is_from_me) {
             try {
-              // 🔒 VERIFICAÇÃO CRÍTICA 2: Propriedade do chat no banco de dados via API (apenas para mensagens de outros)
-              const headers = await getAuthHeaders();
-              const chatResponse = await fetch(`${apiBase}/api/chat/${data.chatId}`, {
-                headers
-              });
-
-              if (!chatResponse.ok) {
-                console.warn('🚨 Mensagem de chat que não pertence ao usuário bloqueada (verificação no banco):', {
-                  chatId: data.chatId,
-                  currentUserId: user.id,
-                  error: `Erro ${chatResponse.status}`
+              // ✅ OTIMIZADO: Usar cache para evitar verificar o mesmo chat múltiplas vezes
+              const cacheKey = data.chatId;
+              const cached = chatOwnershipCacheRef.current.get(cacheKey);
+              const now = Date.now();
+              
+              // Se tem cache válido (menos de 30 segundos), usar o cache
+              if (cached && (now - cached.timestamp) < 30000) {
+                if (!cached.valid) {
+                  console.warn('🚨 Mensagem de chat bloqueada (cache):', { chatId: data.chatId });
+                  return;
+                }
+              } else {
+                // 🔒 VERIFICAÇÃO CRÍTICA 2: Propriedade do chat no banco de dados via API (apenas para mensagens de outros)
+                const headers = await getAuthHeaders();
+                const chatResponse = await fetch(`${apiBase}/api/chat/${data.chatId}`, {
+                  headers
                 });
-                return;
-              }
 
-              const chatData = await chatResponse.json();
-              const chatOwnership = chatData.chat || chatData.data;
+                if (!chatResponse.ok) {
+                  chatOwnershipCacheRef.current.set(cacheKey, { valid: false, timestamp: now });
+                  console.warn('🚨 Mensagem de chat que não pertence ao usuário bloqueada (verificação no banco):', {
+                    chatId: data.chatId,
+                    currentUserId: user.id,
+                    error: `Erro ${chatResponse.status}`
+                  });
+                  return;
+                }
 
-              if (!chatOwnership || chatOwnership.assigned_agent_id !== user.id) {
-                console.warn('🚨 Mensagem de chat que não pertence ao usuário bloqueada (verificação no banco):', {
-                  chatId: data.chatId,
-                  currentUserId: user.id,
-                  assignedAgentId: chatOwnership?.assigned_agent_id
-                });
-                return;
+                const chatData = await chatResponse.json();
+                const chatOwnership = chatData.chat || chatData.data;
+                const isValid = chatOwnership && chatOwnership.assigned_agent_id === user.id;
+
+                // Salvar no cache
+                chatOwnershipCacheRef.current.set(cacheKey, { valid: isValid, timestamp: now });
+
+                if (!isValid) {
+                  console.warn('🚨 Mensagem de chat que não pertence ao usuário bloqueada (verificação no banco):', {
+                    chatId: data.chatId,
+                    currentUserId: user.id,
+                    assignedAgentId: chatOwnership?.assigned_agent_id
+                  });
+                  return;
+                }
               }
             } catch (error) {
               console.error('❌ Erro ao verificar propriedade do chat:', error);
@@ -258,8 +279,13 @@ export const useSupabaseChat = () => {
             });
           }
           
-          // Sempre atualizar lista de chats
-          fetchChats();
+          // ✅ OTIMIZADO: Usar debounce para atualizar lista de chats (evitar múltiplas requisições)
+          if (fetchChatsDebouncedRef.current) {
+            clearTimeout(fetchChatsDebouncedRef.current);
+          }
+          fetchChatsDebouncedRef.current = setTimeout(() => {
+            fetchChats();
+          }, 2000); // Debounce de 2 segundos
           
           // Notificação apenas se não for do chat ativo e não for minha mensagem
           if (activeChat !== chatId && !message.is_from_me) {
@@ -280,7 +306,7 @@ export const useSupabaseChat = () => {
     };
 
     setupSocket();
-  }, [activeChat, setMessages, fetchChats, toast, user, organization?.id]); // Adicionar organization?.id
+  }, [activeChat, setMessages, toast, user, organization?.id]); // ✅ OTIMIZADO: Removido fetchChats das dependências para evitar reconexões
 
   // 🔒 SEGURANÇA: Entrar no chat ativo apenas se o usuário for autenticado
   useEffect(() => {

@@ -429,21 +429,23 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  // Effects
+  // ✅ OTIMIZADO: Effects com carregamento sequencial para melhor performance
   useEffect(() => {
+    if (!user || !profile?.organization_id) return;
+
     widgets.forEach(widget => {
       // Widget loading logic
     });
 
-    // Carregar dados principais primeiro
+    // ✅ FASE 1: Carregar dados críticos primeiro (stats e usuários conectados)
     fetchStats();
     fetchConnectedUsers();
     
-    // Carregar mensagens recentes com pequeno delay para melhorar percepção de velocidade
+    // ✅ FASE 2: Carregar mensagens recentes com delay maior para não bloquear
     // Isso permite que os cards principais apareçam primeiro
     const recentMessagesTimeout = setTimeout(() => {
       fetchRecentMessages();
-    }, 300); // 300ms de delay para carregar depois dos cards principais
+    }, 500); // ✅ AUMENTADO: De 300ms para 500ms para melhorar percepção de velocidade
 
     return () => {
       clearTimeout(recentMessagesTimeout);

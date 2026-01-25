@@ -979,11 +979,20 @@ const ChatDashboardContent = () => {
                 <NotificationButton onOpenSettings={() => setShowNotificationSettings(true)} />
               </div>
             </div>
-          </div>
-          
-          {/* Input de pesquisa - Aparece quando showSearchInput é true */}
-          {showSearchInput && (
-            <div className="px-4 py-2 border-b border-gray-100">
+            
+          {/* Barra de pesquisa - Apenas ícone */}
+          <div className="px-4 pb-3 border-b border-gray-100">
+            {!showSearchInput ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start text-gray-500 hover:text-gray-900 hover:bg-gray-50"
+                onClick={() => setShowSearchInput(true)}
+              >
+                <Search className="w-4 h-4 mr-2" />
+                <span className="text-sm">Pesquisar</span>
+              </Button>
+            ) : (
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                 <Input
@@ -991,6 +1000,7 @@ const ChatDashboardContent = () => {
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   onBlur={() => {
+                    // Esconder input se estiver vazio
                     if (!searchTerm.trim()) {
                       setShowSearchInput(false);
                     }
@@ -999,10 +1009,10 @@ const ChatDashboardContent = () => {
                   autoFocus
                 />
               </div>
-            </div>
-          )}
-            
-          {/* Filtros e ações - Simplificados */}
+            )}
+          </div>
+
+          {/* Filtros simplificados com botão de nova conversa */}
           <div className="px-4 py-2 border-b border-gray-100 flex gap-1 items-center">
             <Button
               size="sm"
@@ -1022,22 +1032,22 @@ const ChatDashboardContent = () => {
             </Button>
             <Button
               size="sm"
-              variant="ghost"
-              className="h-7 w-7 p-0"
-              onClick={() => setShowSearchInput(true)}
-              title="Pesquisar"
+              variant={filter === 'finished' ? 'default' : 'ghost'}
+              onClick={() => setFilter('finished')}
+              className="text-xs h-7 px-3"
             >
-              <Search className="w-4 h-4" />
+              <Archive className="w-3 h-3" />
             </Button>
-            {/* Botão de nova conversa - Apenas ícone */}
+            {/* ✅ NOVO: Botão de nova conversa ao lado dos filtros */}
             <Dialog open={showNewChatModal} onOpenChange={handleModalClose}>
               <DialogTrigger asChild>
                 <Button 
                   size="sm" 
-                  className="bg-purple-600 hover:bg-purple-700 text-white h-7 w-7 p-0"
+                  className="bg-purple-600 hover:bg-purple-700 text-white h-7 px-3"
                   title="Nova conversa"
                 >
-                  <Plus className="w-4 h-4" />
+                  <Plus className="w-4 h-4 mr-1" />
+                  <span className="text-xs">Nova</span>
                 </Button>
               </DialogTrigger>
               <DialogContent>
@@ -1346,9 +1356,19 @@ const ChatDashboardContent = () => {
             </div>
           </div>
           
-          {/* Input de pesquisa - Aparece quando showSearchInput é true */}
-          {showSearchInput && (
-            <div className="mb-3">
+          {/* Barra de pesquisa - Apenas ícone */}
+          <div className="mb-3">
+            {!showSearchInput ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start text-gray-500 hover:text-gray-900 hover:bg-gray-50"
+                onClick={() => setShowSearchInput(true)}
+              >
+                <Search className="w-4 h-4 mr-2" />
+                <span className="text-sm">Pesquisar</span>
+              </Button>
+            ) : (
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                 <Input
@@ -1364,10 +1384,10 @@ const ChatDashboardContent = () => {
                   autoFocus
                 />
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
-          {/* Filtros e ações - Simplificados */}
+          {/* Filtros simplificados com botão de nova conversa */}
           <div className="flex gap-1 items-center">
             <Button
               size="sm"
@@ -1387,22 +1407,22 @@ const ChatDashboardContent = () => {
             </Button>
             <Button
               size="sm"
-              variant="ghost"
-              className="h-7 w-7 p-0"
-              onClick={() => setShowSearchInput(true)}
-              title="Pesquisar"
+              variant={filter === 'finished' ? 'default' : 'ghost'}
+              onClick={() => setFilter('finished')}
+              className="text-xs h-7 px-3"
             >
-              <Search className="w-4 h-4" />
+              <Archive className="w-3 h-3" />
             </Button>
-            {/* Botão de nova conversa - Apenas ícone */}
+            {/* Botão de nova conversa */}
             <Dialog open={showNewChatModal} onOpenChange={handleModalClose}>
               <DialogTrigger asChild>
                 <Button 
                   size="sm" 
-                  className="bg-purple-600 hover:bg-purple-700 text-white h-7 w-7 p-0"
+                  className="bg-purple-600 hover:bg-purple-700 text-white h-7 px-3"
                   title="Nova conversa"
                 >
-                  <Plus className="w-4 h-4" />
+                  <Plus className="w-4 h-4 mr-1" />
+                  <span className="text-xs">Nova</span>
                 </Button>
               </DialogTrigger>
               <DialogContent>

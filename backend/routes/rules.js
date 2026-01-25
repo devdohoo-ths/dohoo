@@ -5,6 +5,16 @@ import { filterBlacklistedMessages } from '../utils/blacklistFilter.js';
 
 const router = express.Router();
 
+// Função para normalizar texto removendo acentos e convertendo para minúsculas
+function normalizeText(text) {
+  if (!text || typeof text !== 'string') return '';
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+    .trim();
+}
+
 // Listar regras da organização
 router.get('/', authenticateToken, async (req, res) => {
   try {
@@ -44,7 +54,35 @@ router.get('/', authenticateToken, async (req, res) => {
     }
 
     console.log('✅ [RULES] Regras encontradas:', rules?.length || 0);
-    res.json({ success: true, rules: rules || [] });
+    
+    // ✅ CORREÇÃO: Garantir que keywords seja sempre um array
+    const processedRules = (rules || []).map(rule => {
+      let keywords = rule.keywords;
+      
+      // Se keywords for uma string, tentar fazer parse
+      if (typeof keywords === 'string') {
+        try {
+          keywords = JSON.parse(keywords);
+        } catch (e) {
+          // Se não for JSON válido, tratar como array com um único elemento
+          keywords = [keywords];
+        }
+      }
+      
+      // Garantir que seja um array
+      if (!Array.isArray(keywords)) {
+        keywords = [];
+      }
+      
+      console.log(`🔍 [RULES] Regra ${rule.id} - Keywords processadas:`, keywords);
+      
+      return {
+        ...rule,
+        keywords: keywords
+      };
+    });
+    
+    res.json({ success: true, rules: processedRules });
   } catch (error) {
     console.error('Erro ao listar regras:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -111,7 +149,27 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 
     console.log('✅ [RULES] Regra criada com sucesso:', rule);
-    res.json({ success: true, rule });
+    
+    // ✅ CORREÇÃO: Garantir que keywords seja sempre um array
+    let processedKeywords = rule.keywords;
+    if (typeof processedKeywords === 'string') {
+      try {
+        processedKeywords = JSON.parse(processedKeywords);
+      } catch (e) {
+        processedKeywords = [processedKeywords];
+      }
+    }
+    if (!Array.isArray(processedKeywords)) {
+      processedKeywords = [];
+    }
+    
+    const processedRule = {
+      ...rule,
+      keywords: processedKeywords
+    };
+    
+    console.log('🔍 [RULES] Regra processada antes de retornar:', processedRule);
+    res.json({ success: true, rule: processedRule });
   } catch (error) {
     console.error('Erro ao criar regra:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -169,7 +227,25 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
     if (error) throw error;
 
-    res.json({ success: true, rule });
+    // ✅ CORREÇÃO: Garantir que keywords seja sempre um array
+    let processedKeywords = rule.keywords;
+    if (typeof processedKeywords === 'string') {
+      try {
+        processedKeywords = JSON.parse(processedKeywords);
+      } catch (e) {
+        processedKeywords = [processedKeywords];
+      }
+    }
+    if (!Array.isArray(processedKeywords)) {
+      processedKeywords = [];
+    }
+    
+    const processedRule = {
+      ...rule,
+      keywords: processedKeywords
+    };
+    
+    res.json({ success: true, rule: processedRule });
   } catch (error) {
     console.error('Erro ao atualizar regra:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -256,13 +332,35 @@ router.post('/report', authenticateToken, async (req, res) => {
     if (rulesError) throw rulesError;
 
     console.log('🔍 [DEBUG] Regras encontradas:', rules?.length || 0);
-    if (rules && rules.length > 0) {
-      rules.forEach(rule => {
-        console.log('🔍 [DEBUG] Regra:', rule.name, 'Keywords:', rule.keywords);
-      });
-    }
-
-    if (!rules || rules.length === 0) {
+    
+    // ✅ CORREÇÃO: Processar keywords das regras antes de usar
+    const processedRules = (rules || []).map(rule => {
+      let keywords = rule.keywords;
+      
+      // Se keywords for uma string, tentar fazer parse
+      if (typeof keywords === 'string') {
+        try {
+          keywords = JSON.parse(keywords);
+        } catch (e) {
+          // Se não for JSON válido, tratar como array com um único elemento
+          keywords = [keywords];
+        }
+      }
+      
+      // Garantir que seja um array
+      if (!Array.isArray(keywords)) {
+        keywords = [];
+      }
+      
+      console.log(`🔍 [DEBUG] Regra "${rule.name}" - Keywords processadas:`, keywords);
+      
+      return {
+        ...rule,
+        keywords: keywords
+      };
+    });
+    
+    if (processedRules.length === 0) {
       return res.json({ 
         success: true, 
         occurrences: [],
@@ -272,6 +370,8 @@ router.post('/report', authenticateToken, async (req, res) => {
     }
 
     // Buscar mensagens no período
+    console.log('🔍 [DEBUG] Buscando mensagens no período:', { dateStart, dateEnd });
+    
     const { data: messages, error: messagesError } = await supabase
       .from('messages')
       .select(`
@@ -288,34 +388,67 @@ router.post('/report', authenticateToken, async (req, res) => {
       .lte('created_at', dateEnd)
       .not('content', 'is', null);
 
-    if (messagesError) throw messagesError;
+    if (messagesError) {
+      console.error('❌ [DEBUG] Erro ao buscar mensagens:', messagesError);
+      throw messagesError;
+    }
 
     console.log('🔍 [DEBUG] Mensagens encontradas:', messages?.length || 0);
     if (messages && messages.length > 0) {
-      console.log('🔍 [DEBUG] Primeiras 3 mensagens:');
-      messages.slice(0, 3).forEach(msg => {
-        console.log('🔍 [DEBUG] - ID:', msg.id, 'Content:', msg.content?.substring(0, 50), 'Org:', msg.organization_id);
+      console.log('🔍 [DEBUG] Primeiras 5 mensagens:');
+      messages.slice(0, 5).forEach((msg, idx) => {
+        console.log(`🔍 [DEBUG] Mensagem ${idx + 1}:`, {
+          id: msg.id,
+          content: msg.content?.substring(0, 100),
+          created_at: msg.created_at,
+          chat_id: msg.chat_id,
+          organization_id: msg.organization_id
+        });
       });
+    } else {
+      console.log('⚠️ [DEBUG] Nenhuma mensagem encontrada no período especificado');
     }
 
-    // 🎯 APLICAR FILTRO DE BLACKLIST
-    console.log('🚫 [BLACKLIST] Aplicando filtro de blacklist...');
-    const filteredMessages = await filterBlacklistedMessages(messages || [], req.user.organization_id);
-    console.log('🚫 [BLACKLIST] Mensagens após filtro:', filteredMessages.length);
+    // 🎯 NOTA: Para regras de monitoramento, NÃO aplicamos filtro de blacklist
+    // porque queremos monitorar TODAS as mensagens, incluindo as que estão na blacklist
+    // O filtro de blacklist é para relatórios normais, não para monitoramento de regras
+    console.log('🔍 [DEBUG] Processando TODAS as mensagens (sem filtro de blacklist para monitoramento)');
+    const filteredMessages = messages || [];
 
     // Processar mensagens contra as regras
     const reportData = [];
     let occurrenceId = 1;
+    let processedCount = 0;
+    
     for (const message of filteredMessages || []) {
-      const content = message.content.toLowerCase();
-      console.log('🔍 [DEBUG] Processando mensagem ID:', message.id);
+      processedCount++;
+      const content = normalizeText(message.content || '');
+      console.log(`🔍 [DEBUG] Processando mensagem ${processedCount}/${filteredMessages.length} - ID:`, message.id);
+      console.log('🔍 [DEBUG] Conteúdo da mensagem (normalizado):', content.substring(0, 100));
+      console.log('🔍 [DEBUG] Conteúdo da mensagem (original):', message.content?.substring(0, 100));
       
-      for (const rule of rules) {
+      for (const rule of processedRules) {
+        if (!rule.keywords || rule.keywords.length === 0) {
+          console.log(`⚠️ [DEBUG] Regra "${rule.name}" não tem keywords válidas`);
+          continue;
+        }
+        
         for (const keyword of rule.keywords) {
-          const keywordLower = keyword.toLowerCase();
+          if (!keyword || typeof keyword !== 'string') {
+            console.log(`⚠️ [DEBUG] Keyword inválida na regra "${rule.name}":`, keyword);
+            continue;
+          }
           
-          if (content.includes(keywordLower)) {
-            console.log('🔍 [DEBUG] MATCH ENCONTRADO! Regra:', rule.name, 'Keyword:', keyword);
+          const keywordNormalized = normalizeText(keyword);
+          
+          if (keywordNormalized.length === 0) {
+            continue;
+          }
+          
+          console.log(`🔍 [DEBUG] Verificando keyword "${keyword}" (normalizada: "${keywordNormalized}") na mensagem...`);
+          
+          if (content.includes(keywordNormalized)) {
+            console.log('✅ [DEBUG] MATCH ENCONTRADO! Regra:', rule.name, 'Keyword:', keyword, 'Mensagem ID:', message.id);
             
             // Buscar nome do agente (se assigned_agent_id existir)
             let agentName = 'Agente';
@@ -343,12 +476,20 @@ router.post('/report', authenticateToken, async (req, res) => {
               chat_id: message.chat_id,
               message_id: message.id
             });
+            
+            // Parar de verificar outras keywords da mesma regra após encontrar uma
+            break;
+          } else {
+            console.log(`❌ [DEBUG] Keyword "${keywordNormalized}" não encontrada na mensagem`);
           }
         }
       }
     }
 
     console.log('🔍 [DEBUG] Relatório final:', reportData.length, 'ocorrências');
+    if (reportData.length > 0) {
+      console.log('🔍 [DEBUG] Primeiras ocorrências:', reportData.slice(0, 3));
+    }
 
     res.json({ 
       success: true, 

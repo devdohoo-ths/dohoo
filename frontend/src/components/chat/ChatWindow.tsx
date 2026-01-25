@@ -634,26 +634,18 @@ const ChatWindow = ({
               )}
             </div>
             <div>
-              <h3 className="text-gray-800">
+              <h3 className="text-base font-semibold text-gray-900">
                 {/* ✅ CORRIGIDO: Sempre mostrar o nome do grupo para grupos */}
                 {(chat.is_group || chat.whatsapp_jid?.includes('@g.us')) 
                   ? (chat.name || 'Grupo') 
                   : chat.name
                 }
               </h3>
-              <div className="flex items-center space-x-2">
-                {(chat.is_group || chat.whatsapp_jid?.includes('@g.us')) ? (
-                  <span className="text-sm text-gray-500">
-                    {/* ✅ CORRIGIDO: Mostrar participantes ou ID do grupo */}
-                    {chat.participants?.length > 0 
-                      ? chat.participants.map((p: any) => p.name).join(', ')
-                      : (chat.whatsapp_jid?.split('@')[0] || 'Participantes')
-                    }
-                  </span>
-                ) : (
-                  <span className="text-sm text-gray-500">{chat.whatsapp_jid?.split('@')[0]}</span>
-                )}
-              </div>
+              {(chat.is_group || chat.whatsapp_jid?.includes('@g.us')) && chat.participants?.length > 0 && (
+                <span className="text-xs text-gray-500">
+                  {chat.participants.length} participante{chat.participants.length > 1 ? 's' : ''}
+                </span>
+              )}
             </div>
           </div>
 

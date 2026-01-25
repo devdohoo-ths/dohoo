@@ -97,6 +97,10 @@ const ReportDetailedConversations: React.FC = () => {
   // Estados para paginação
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(50);
+  
+  // ✅ NOVO: Estados para ordenação da tabela
+  const [sortColumn, setSortColumn] = useState<keyof DetailedConversation | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
   
   // Usar apenas o dia atual por padrão
@@ -163,11 +167,58 @@ const ReportDetailedConversations: React.FC = () => {
     });
   }, [filteredConversations, realTotalMessages]);
 
-  // Funções para paginação
+  // ✅ NOVO: Função para ordenar conversas
+  const getSortedConversations = () => {
+    let sorted = [...filteredConversations];
+    
+    if (sortColumn) {
+      sorted.sort((a, b) => {
+        const aValue = a[sortColumn];
+        const bValue = b[sortColumn];
+        
+        // Tratamento para diferentes tipos de dados
+        if (sortColumn === 'date' || sortColumn === 'last_message_time') {
+          const aDate = new Date(aValue as string);
+          const bDate = new Date(bValue as string);
+          return sortDirection === 'asc' 
+            ? aDate.getTime() - bDate.getTime()
+            : bDate.getTime() - aDate.getTime();
+        }
+        
+        if (typeof aValue === 'number' && typeof bValue === 'number') {
+          return sortDirection === 'asc' ? aValue - bValue : bValue - aValue;
+        }
+        
+        // Para strings
+        const aStr = String(aValue || '').toLowerCase();
+        const bStr = String(bValue || '').toLowerCase();
+        return sortDirection === 'asc'
+          ? aStr.localeCompare(bStr)
+          : bStr.localeCompare(aStr);
+      });
+    }
+    
+    return sorted;
+  };
+  
+  // Funções para paginação (agora usa ordenação)
   const getPaginatedConversations = () => {
+    const sorted = getSortedConversations();
     const startIndex = (currentPage - 1) * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
-    return filteredConversations.slice(startIndex, endIndex);
+    return sorted.slice(startIndex, endIndex);
+  };
+  
+  // ✅ NOVO: Função para lidar com clique na coluna para ordenar
+  const handleSort = (column: keyof DetailedConversation) => {
+    if (sortColumn === column) {
+      // Se já está ordenando por esta coluna, inverter direção
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      // Nova coluna, começar com desc
+      setSortColumn(column);
+      setSortDirection('desc');
+    }
   };
 
   const getTotalPages = () => {
@@ -279,15 +330,21 @@ const ReportDetailedConversations: React.FC = () => {
         logger.debug('[Relatório Detalhado] Sem filtro de agente - buscando todos os usuários');
       }
       
-      // 🎯 MIGRADO: Buscar dados via API do backend
-      logger.debug('[Relatório Detalhado] Buscando dados via API do backend');
+      // ✅ CORREÇÃO: Buscar chats via API de mensagens (que faz join com chats)
+      // Depois buscar chats que não têm mensagens no período mas foram criados/atualizados no período
+      logger.debug('[Relatório Detalhado] Buscando dados via API');
       logger.debug('[Relatório Detalhado] Datas sendo usadas', {
         startDate: startDate.toISOString(),
         endDate: endDate.toISOString(),
         organizationId: organization.id
       });
       
-      // Buscar mensagens via API do backend
+      const headers = await getAuthHeaders();
+      
+      // ✅ FASE 1: Buscar mensagens (que já incluem chats via join)
+      // Isso nos dá a maioria dos chats que têm mensagens no período
+      
+      // ✅ FASE 2: Buscar mensagens no período para calcular estatísticas
       const messagesParams = new URLSearchParams({
         organization_id: organization.id,
         dateStart: startDate.toISOString().split('T')[0],
@@ -303,7 +360,6 @@ const ReportDetailedConversations: React.FC = () => {
         messagesParams.append('agents', filters.userId);
       }
 
-      const headers = await getAuthHeaders();
       const messagesResponse = await fetch(`${apiBase}/api/messages?${messagesParams}`, {
         headers
       });
@@ -378,21 +434,31 @@ const ReportDetailedConversations: React.FC = () => {
       logger.debug('[Relatório Detalhado] Usuários encontrados', userMap.size);
       logger.debug('[Relatório Detalhado] Mapeamento de usuários', Array.from(userMap.entries()));
       
-      // Criar estrutura compatível com o código existente
-      const recentMessagesData = {
-        success: true,
-        messages: messages || [],
-        userMap: userMap
-      };
+      // ✅ CORREÇÃO: Processar mensagens primeiro para extrair chats
+      // Depois buscar chats adicionais que não têm mensagens no período
+      const uniqueChats = new Map(); // Key: chat_id, Value: conversa
+      logger.debug('[Relatório Detalhado] Processando mensagens para extrair chats', {
+        messagesCount: messages?.length || 0
+      });
       
-      // 🎯 NOVO: Converter mensagens em conversas únicas (versão simplificada)
-      // ✅ CORREÇÃO: Usar Map para agrupar por telefone normalizado em vez de apenas chatId
-      const uniqueChats = new Map(); // Key: telefone normalizado, Value: conversa
-      const chatIdToPhoneMap = new Map(); // Mapear chatId -> telefone normalizado
-      logger.debug('[Relatório Detalhado] Processando mensagens para conversas', recentMessagesData.messages?.length || 0);
+      // ✅ FASE 1: Extrair chats únicos das mensagens recebidas
+      const chatIdsFromMessages = new Set<string>();
+      (messages || []).forEach((msg: any) => {
+        if (msg.chat_id) {
+          chatIdsFromMessages.add(msg.chat_id);
+        }
+      });
+      
+      logger.debug(`[Relatório Detalhado] ${chatIdsFromMessages.size} chats únicos encontrados nas mensagens`);
+      
+      // ✅ REMOVIDO: Não buscar chats adicionais sem mensagens no período
+      // O comportamento correto é mostrar apenas conversas que tiveram mensagens no período filtrado
+      // Isso evita mostrar conversas zeradas que não têm atividade no período selecionado
+      
+      logger.debug(`[Relatório Detalhado] Total de ${uniqueChats.size} conversas com mensagens no período`);
       
       // ✅ MIGRADO: Buscar todos os chats que estão faltando no join de uma vez via API
-      const messagesWithoutChats = (recentMessagesData.messages || []).filter((m: any) => !m.chat || m.chat === null);
+      const messagesWithoutChats = (messages || []).filter((m: any) => !m.chat || m.chat === null);
       const uniqueChatIdsToFetch = [...new Set(messagesWithoutChats.map((m: any) => m.chat_id).filter(Boolean))];
       
       let fetchedChatsMap = new Map();
@@ -410,6 +476,57 @@ const ReportDetailedConversations: React.FC = () => {
             const fetchedChats = chatsResult.chats || chatsResult.data || [];
             fetchedChats.forEach((chat: any) => {
               fetchedChatsMap.set(chat.id, chat);
+              // Adicionar chat se ainda não existe
+              if (!uniqueChats.has(chat.id)) {
+                const chatName = chat.name || chat.contact_name || chat.whatsapp_jid || `Chat ${chat.id.substring(0, 8)}`;
+                const rawPhone = chat.whatsapp_jid || chat.remote_jid || chat.contact_phone;
+                const normalizePhone = (phone: string | null | undefined): string => {
+                  if (!phone || phone === 'N/A' || phone === 'Grupo') return phone || 'N/A';
+                  if (phone.includes('@')) {
+                    const jidPart = phone.split('@')[0];
+                    return jidPart.replace(/\D/g, '');
+                  }
+                  return phone.replace(/\D/g, '') || phone;
+                };
+                const phoneNumber = normalizePhone(rawPhone);
+                const agentId = chat.assigned_agent_id;
+                const agentName = agentId && userMap.has(agentId) 
+                  ? userMap.get(agentId) 
+                  : 'Usuário';
+                
+                uniqueChats.set(chat.id, {
+                  id: chat.id,
+                  chatId: chat.id,
+                  chatIds: [chat.id],
+                  customerName: chatName,
+                  customerPhone: phoneNumber,
+                  customer_name_whatsapp: chatName,
+                  customer_avatar_url: chat.avatar_url || undefined,
+                  channel: chat.platform || 'whatsapp',
+                  agentName: agentName,
+                  agentId: agentId,
+                  startTime: chat.created_at,
+                  endTime: chat.updated_at || chat.created_at,
+                  duration: 0,
+                  status: chat.status || 'active',
+                  tags: [],
+                  totalMessages: 0,
+                  priority: 'normal',
+                  department: null,
+                  satisfaction: undefined,
+                  sentiment: undefined,
+                  category: undefined,
+                  internalNotes: undefined,
+                  transfers: [],
+                  unreadCount: 0,
+                  aiAnalysis: undefined,
+                  actualSentMessages: 0,
+                  actualReceivedMessages: 0,
+                  actualPhone: phoneNumber,
+                  actualCustomerName: chatName,
+                  actualWhatsappName: chatName
+                });
+              }
             });
             logger.debug(`[Relatório Detalhado] ${fetchedChats.length} chats encontrados separadamente`);
           } else {
@@ -420,22 +537,22 @@ const ReportDetailedConversations: React.FC = () => {
         }
       }
       
-      // ✅ DEBUG: Verificar estrutura das mensagens recebidas
-      if (recentMessagesData.messages && recentMessagesData.messages.length > 0) {
+      // ✅ FASE 2: Processar mensagens para atualizar estatísticas dos chats
+      if (messages && messages.length > 0) {
         logger.debug('[Relatório Detalhado] Exemplo de mensagem recebida:', {
           firstMessage: {
-            id: recentMessagesData.messages[0].id,
-            chat_id: recentMessagesData.messages[0].chat_id,
-            hasChats: !!recentMessagesData.messages[0].chats,
-            chatsStructure: recentMessagesData.messages[0].chats ? Object.keys(recentMessagesData.messages[0].chats) : null,
-            content: recentMessagesData.messages[0].content?.substring(0, 50),
-            is_from_me: recentMessagesData.messages[0].is_from_me,
-            user_id: recentMessagesData.messages[0].user_id
+            id: messages[0].id,
+            chat_id: messages[0].chat_id,
+            hasChats: !!messages[0].chats,
+            chatsStructure: messages[0].chats ? Object.keys(messages[0].chats) : null,
+            content: messages[0].content?.substring(0, 50),
+            is_from_me: messages[0].is_from_me,
+            user_id: messages[0].user_id
           }
         });
       }
       
-      (recentMessagesData.messages || []).forEach((msg: any, index: number) => {
+      (messages || []).forEach((msg: any, index: number) => {
         // ✅ CORREÇÃO: Verificar se mensagem tem chat_id
         const chatId = msg.chat_id;
         
@@ -497,15 +614,15 @@ const ReportDetailedConversations: React.FC = () => {
           msgUserId: msg.user_id,
           assignedAgentId: chatData?.assigned_agent_id,
           senderName: msg.sender_name,
-          userMapKeys: Array.from(recentMessagesData.userMap.keys()),
-          userMapValues: Array.from(recentMessagesData.userMap.values())
+          userMapKeys: Array.from(userMap.keys()),
+          userMapValues: Array.from(userMap.values())
         });
         
-        if (msg.user_id && recentMessagesData.userMap.has(msg.user_id)) {
-          userName = recentMessagesData.userMap.get(msg.user_id);
+        if (msg.user_id && userMap.has(msg.user_id)) {
+          userName = userMap.get(msg.user_id);
           logger.debug(`[Debug] Usuário encontrado por msg.user_id: ${userName}`);
-        } else if (chatData?.assigned_agent_id && recentMessagesData.userMap.has(chatData.assigned_agent_id)) {
-          userName = recentMessagesData.userMap.get(chatData.assigned_agent_id);
+        } else if (chatData?.assigned_agent_id && userMap.has(chatData.assigned_agent_id)) {
+          userName = userMap.get(chatData.assigned_agent_id);
           logger.debug(`[Debug] Usuário encontrado por assigned_agent_id: ${userName}`);
         } else if (msg.sender_name) {
           userName = msg.sender_name;
@@ -514,39 +631,23 @@ const ReportDetailedConversations: React.FC = () => {
           logger.debug(`[Debug] Usuário não encontrado, usando fallback: ${userName}`);
         }
         
-        // ✅ CORREÇÃO: Normalizar telefone para unificar conversas do mesmo número
+        // Extrair telefone do chat (apenas para exibição, não para agrupamento)
+        const rawPhone = chatData?.whatsapp_jid || chatData?.remote_jid || chatData?.contact_phone;
         const normalizePhone = (phone: string | null | undefined): string => {
           if (!phone || phone === 'N/A' || phone === 'Grupo') return phone || 'N/A';
-          
-          // Se termina com @s.whatsapp.net ou similar, extrair apenas o número
           if (phone.includes('@')) {
             const jidPart = phone.split('@')[0];
-            // Remover caracteres não numéricos do JID
             return jidPart.replace(/\D/g, '');
           }
-          
-          // Remover caracteres não numéricos
-          const cleaned = phone.replace(/\D/g, '');
-          
-          return cleaned || phone;
+          return phone.replace(/\D/g, '') || phone;
         };
-        
-        // Extrair telefone do chat
-        const rawPhone = chatData?.whatsapp_jid || chatData?.remote_jid;
         const phoneNumber = normalizePhone(rawPhone);
-        
-        // ✅ CORREÇÃO: Usar telefone normalizado como chave única, mas manter fallback para grupos/chats sem telefone
-        // Para grupos ou chats sem telefone válido, usar chatId como chave
-        const normalizedPhone = (phoneNumber && phoneNumber !== 'N/A' && phoneNumber !== 'Grupo' && phoneNumber.length >= 10) 
-          ? phoneNumber 
-          : `chat_${chatId}`;
         
         logger.debug(`[Relatório Detalhado] Processando mensagem ${index + 1}:`, {
           chatId,
           chatName,
           userName,
           phoneNumber,
-          normalizedPhone,
           userId: msg.user_id,
           assignedAgentId: chatData?.assigned_agent_id,
           isFromMe: msg.is_from_me,
@@ -557,19 +658,17 @@ const ReportDetailedConversations: React.FC = () => {
           chatData
         });
         
-        // ✅ CORREÇÃO: Agrupar por telefone normalizado em vez de chatId
-        // Mapear chatId para telefone normalizado
-        chatIdToPhoneMap.set(chatId, normalizedPhone);
-        
-        if (!uniqueChats.has(normalizedPhone)) {
-          uniqueChats.set(normalizedPhone, {
-            id: normalizedPhone, // Usar telefone normalizado como ID único
-            chatId: chatId, // Manter referência ao primeiro chatId encontrado
-            chatIds: [chatId], // ✅ NOVO: Lista de todos os chatIds que pertencem a esta conversa
+        // ✅ CORREÇÃO: Agrupar por chat_id (cada chat é uma conversa única)
+        // Não unificar conversas diferentes mesmo que tenham o mesmo número
+        if (!uniqueChats.has(chatId)) {
+          uniqueChats.set(chatId, {
+            id: chatId, // ✅ Usar chat_id como ID único
+            chatId: chatId,
+            chatIds: [chatId], // Lista com apenas este chatId
             customerName: chatName,
             customerPhone: phoneNumber,
             customer_name_whatsapp: chatName,
-            customer_avatar_url: chatData?.avatar_url || undefined, // ✅ NOVA: Foto do cliente
+            customer_avatar_url: chatData?.avatar_url || undefined,
             channel: chatData?.platform || 'whatsapp',
             agentName: userName,
             agentId: msg.user_id || chatData?.assigned_agent_id,
@@ -594,18 +693,11 @@ const ReportDetailedConversations: React.FC = () => {
             actualCustomerName: chatName,
             actualWhatsappName: chatName
           });
-          logger.debug(`[Relatório Detalhado] Nova conversa criada: ${normalizedPhone} (${phoneNumber}) - ${chatName} (Usuário: ${userName}, ChatId: ${chatId})`);
-        } else {
-          // ✅ NOVO: Se já existe conversa com este telefone, adicionar chatId à lista
-          const existingChat = uniqueChats.get(normalizedPhone);
-          if (existingChat && !existingChat.chatIds.includes(chatId)) {
-            existingChat.chatIds.push(chatId);
-            logger.debug(`[Relatório Detalhado] Chat ${chatId} unificado com conversa existente ${normalizedPhone}`);
-          }
+          logger.debug(`[Relatório Detalhado] Nova conversa criada: ChatId ${chatId} - ${chatName} (Usuário: ${userName}, Telefone: ${phoneNumber})`);
         }
         
-        // Incrementar contadores usando telefone normalizado
-        const chat = uniqueChats.get(normalizedPhone);
+        // Incrementar contadores usando chat_id
+        const chat = uniqueChats.get(chatId);
         if (chat) {
           chat.totalMessages++;
           if (msg.is_from_me) {
@@ -632,15 +724,15 @@ const ReportDetailedConversations: React.FC = () => {
           }
           
           // 🎯 NOVO: Atualizar o nome do usuário se encontramos um melhor
-          if (msg.user_id && recentMessagesData.userMap.has(msg.user_id)) {
-            const newUserName = recentMessagesData.userMap.get(msg.user_id);
+          if (msg.user_id && userMap.has(msg.user_id)) {
+            const newUserName = userMap.get(msg.user_id);
             if (newUserName !== 'Usuário' && newUserName !== chat.agentName) {
               logger.debug(`[Debug] Atualizando nome do usuário de "${chat.agentName}" para "${newUserName}"`);
               chat.agentName = newUserName;
               chat.agentId = msg.user_id;
             }
-          } else if (chatData?.assigned_agent_id && recentMessagesData.userMap.has(chatData.assigned_agent_id)) {
-            const newUserName = recentMessagesData.userMap.get(chatData.assigned_agent_id);
+          } else if (chatData?.assigned_agent_id && userMap.has(chatData.assigned_agent_id)) {
+            const newUserName = userMap.get(chatData.assigned_agent_id);
             if (newUserName !== 'Usuário' && newUserName !== chat.agentName) {
               logger.debug(`[Debug] Atualizando nome do usuário de "${chat.agentName}" para "${newUserName}"`);
               chat.agentName = newUserName;
@@ -658,7 +750,7 @@ const ReportDetailedConversations: React.FC = () => {
             }
           }
         } else {
-          logger.warn(`[Relatório Detalhado] Conversa não encontrada para telefone normalizado: ${normalizedPhone}`);
+          logger.warn(`[Relatório Detalhado] Conversa não encontrada para chatId: ${chatId}`);
         }
       });
       
@@ -667,19 +759,15 @@ const ReportDetailedConversations: React.FC = () => {
       logger.debug('[Relatório Detalhado] Primeiras 3 conversas', conversations.slice(0, 3));
       
       // ✅ CORREÇÃO: Verificar se há conversas antes de continuar
+      // Agora temos conversas mesmo sem mensagens (criadas a partir dos chats)
       if (conversations.length === 0) {
         logger.warn('[Relatório Detalhado] Nenhuma conversa encontrada após processamento');
-        logger.debug('[Relatório Detalhado] Debug - Mensagens processadas:', {
+        logger.debug('[Relatório Detalhado] Debug - Mensagens:', {
           totalMessages: messages?.length || 0,
           messagesWithChatId: messages?.filter((m: any) => m.chat_id).length || 0,
           messagesWithoutChatId: messages?.filter((m: any) => !m.chat_id).length || 0,
-          sampleMessages: messages?.slice(0, 3).map((m: any) => ({
-            id: m.id,
-            hasChatId: !!m.chat_id,
-            chatId: m.chat_id,
-            hasChats: !!m.chats,
-            content: m.content?.substring(0, 50)
-          })) || []
+          uniqueChatsFromMessages: new Set(messages?.map((m: any) => m.chat_id).filter(Boolean)).size,
+          uniqueChatsCreated: uniqueChats.size
         });
         
         setConversations([]);
@@ -687,6 +775,18 @@ const ReportDetailedConversations: React.FC = () => {
         setLoading(false);
         return;
       }
+      
+      const chatsWithMessages = new Set(messages?.map((m: any) => m.chat_id).filter(Boolean)).size;
+      logger.debug(`[Relatório Detalhado] ✅ Total de ${conversations.length} conversas encontradas`, {
+        chatsFromMessages: chatsWithMessages,
+        totalConversations: conversations.length,
+        sampleConversation: conversations[0] ? {
+          id: conversations[0].id,
+          chatId: conversations[0].chatId,
+          customerName: conversations[0].customerName,
+          totalMessages: conversations[0].totalMessages
+        } : null
+      });
       
       // Criar estrutura compatível com o código existente
       const data = {
@@ -730,21 +830,17 @@ const ReportDetailedConversations: React.FC = () => {
       }
       
       // 🚀 OTIMIZAÇÃO: Buscar dados em batch ao invés de N+1 queries
-      // ✅ CORREÇÃO: Coletar todos os chatIds de todas as conversas unificadas
+      // ✅ CORREÇÃO: Coletar todos os chatIds (cada conversa tem apenas um chatId agora)
       const allChatIds = new Set<string>();
       (data.conversations || []).forEach((conv: any) => {
-        if (conv.chatIds && Array.isArray(conv.chatIds)) {
-          conv.chatIds.forEach((cid: string) => allChatIds.add(cid));
-        } else if (conv.chatId) {
-          allChatIds.add(conv.chatId);
-        } else if (conv.id && conv.id.startsWith('chat_')) {
-          // Se o ID é um chatId, adicionar também
-          allChatIds.add(conv.id.replace('chat_', ''));
+        const chatId = conv.chatId || conv.id;
+        if (chatId) {
+          allChatIds.add(chatId);
         }
       });
       
       const conversationIds = Array.from(allChatIds);
-      logger.debug(`[Debug] Buscando dados em batch para ${conversationIds.length} chats únicos (${data.conversations.length} conversas unificadas)`);
+      logger.debug(`[Debug] Buscando dados em batch para ${conversationIds.length} chats únicos (${data.conversations.length} conversas)`);
       
       // 1. Buscar todas as mensagens de uma vez para todos os chats via API
       const batchMessagesParams = new URLSearchParams({
@@ -809,35 +905,22 @@ const ReportDetailedConversations: React.FC = () => {
       // 3. Processar dados em memória
       const conversationsWithDetails = (data.conversations || []).map((conv: any) => {
         try {
-          // ✅ CORREÇÃO: Agregar mensagens de todos os chatIds desta conversa unificada
-          const chatIdsToProcess = conv.chatIds && Array.isArray(conv.chatIds) 
-            ? conv.chatIds 
-            : [conv.chatId || conv.id];
+          // ✅ CORREÇÃO: Cada conversa agora tem apenas um chatId (não unificamos mais)
+          const chatId = conv.chatId || conv.id;
           
-          // Coletar todas as mensagens de todos os chats desta conversa
-          const allChatMessages: any[] = [];
-          chatIdsToProcess.forEach((cid: string) => {
-            const messages = messagesByChatId.get(cid) || [];
-            allChatMessages.push(...messages);
-          });
+          // Buscar mensagens deste chat específico
+          const chatMessages = messagesByChatId.get(chatId) || [];
           
-          // Calcular mensagens enviadas/recebidas de todos os chats unificados
-          const sentCount = allChatMessages.filter((m: any) => m.is_from_me).length;
-          const receivedCount = allChatMessages.filter((m: any) => !m.is_from_me).length;
+          // Calcular mensagens enviadas/recebidas deste chat
+          const sentCount = chatMessages.filter((m: any) => m.is_from_me).length;
+          const receivedCount = chatMessages.filter((m: any) => !m.is_from_me).length;
           
-          // Buscar dados do primeiro chat (ou melhor chat disponível)
-          let chatData = null;
-          for (const cid of chatIdsToProcess) {
-            const foundChat = chatsById.get(cid);
-            if (foundChat) {
-              chatData = foundChat;
-              break; // Usar o primeiro chat encontrado
-            }
-          }
+          // Buscar dados do chat
+          let chatData = chatsById.get(chatId);
           
-          // Se não encontrou nenhum chat, tentar usar conv.id diretamente
+          // Se não encontrou, tentar usar conv.id diretamente
           if (!chatData) {
-            chatData = chatsById.get(conv.id) || chatsById.get(conv.chatId);
+            chatData = chatsById.get(conv.id);
           }
           
           // ✅ CORREÇÃO: Extrair telefone e nome de forma mais robusta
@@ -948,11 +1031,6 @@ const ReportDetailedConversations: React.FC = () => {
       applyClientFilters(processedConversations);
       logger.debug('[Relatório Detalhado] Filtros aplicados, verificando estado filteredConversations');
       
-      toast({
-        title: "Sucesso",
-        description: `${processedConversations.length} conversas encontradas com ${stats.totalMessages} mensagens totais`,
-      });
-      
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Erro ao buscar conversas');
       toast({
@@ -976,6 +1054,13 @@ const ReportDetailedConversations: React.FC = () => {
       userId: currentFilters.userId,
       keyword: currentFilters.keyword
     });
+    
+    // ✅ NOVO: Filtrar conversas sem mensagens no período (0 enviadas e 0 recebidas)
+    // Isso garante que só apareçam conversas que realmente tiveram atividade no período
+    filtered = filtered.filter(conv => 
+      (conv.messages_sent || 0) > 0 || (conv.messages_received || 0) > 0
+    );
+    logger.debug('[Relatório Detalhado] Após filtrar conversas sem mensagens', filtered.length);
     
     if (currentFilters.customerName) {
       filtered = filtered.filter(conv => 
@@ -1047,9 +1132,43 @@ const ReportDetailedConversations: React.FC = () => {
       }
       
       const result = await response.json();
-      const data = result.messages || result.data || [];
+      let data = result.messages || result.data || [];
       
-      setConversationDetails(data || []);
+      // ✅ CRÍTICO: Validação de segurança - filtrar apenas mensagens do chat_id correto
+      // Isso previne vazamento de dados se o backend retornar mensagens de outros chats
+      const filteredData = data.filter((msg: any) => {
+        const msgChatId = msg.chat_id;
+        if (!msgChatId || msgChatId !== chatId) {
+          console.error('🚨 [SEGURANÇA] Mensagem de chat incorreto detectada e removida:', {
+            messageId: msg.id,
+            expectedChatId: chatId,
+            actualChatId: msgChatId,
+            content: msg.content?.substring(0, 50)
+          });
+          return false;
+        }
+        return true;
+      });
+      
+      if (filteredData.length !== data.length) {
+        console.warn(`🚨 [SEGURANÇA] ${data.length - filteredData.length} mensagens de outros chats foram filtradas!`);
+        toast({
+          title: "Aviso de Segurança",
+          description: "Algumas mensagens foram filtradas por segurança",
+          variant: "destructive"
+        });
+      }
+      
+      logger.debug(`[Relatório Detalhado] Mensagens recebidas: ${data.length}, Após filtro: ${filteredData.length} para chat ${chatId}`);
+      
+      // ✅ ORDENAR: Mensagens em ordem cronológica (mais antigas primeiro) para exibição correta da conversa
+      const sortedMessages = [...filteredData].sort((a, b) => {
+        const dateA = new Date(a.created_at).getTime();
+        const dateB = new Date(b.created_at).getTime();
+        return dateA - dateB; // Ordem crescente (mais antigas primeiro)
+      });
+      
+      setConversationDetails(sortedMessages);
     } catch (error) {
       console.error('[Relatório Detalhado] Erro ao buscar detalhes da conversa:', error);
     } finally {
@@ -1777,20 +1896,81 @@ const ReportDetailedConversations: React.FC = () => {
               </p>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Foto</TableHead>
-                  <TableHead>Data</TableHead>
-                  <TableHead>Usuário</TableHead>
-                  <TableHead>Nome WhatsApp</TableHead>
-                  <TableHead>Telefone</TableHead>
-                  <TableHead>Enviadas</TableHead>
-                  <TableHead>Recebidas</TableHead>
-                  <TableHead>Última Mensagem</TableHead>
-                  <TableHead>Ações</TableHead>
-                </TableRow>
-              </TableHeader>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-16">Foto</TableHead>
+                    <TableHead 
+                      className="cursor-pointer hover:bg-gray-50 select-none"
+                      onClick={() => handleSort('date')}
+                    >
+                      <div className="flex items-center gap-2">
+                        Data
+                        {sortColumn === 'date' && (
+                          <span>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                        )}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="cursor-pointer hover:bg-gray-50 select-none"
+                      onClick={() => handleSort('user_name')}
+                    >
+                      <div className="flex items-center gap-2">
+                        Usuário
+                        {sortColumn === 'user_name' && (
+                          <span>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                        )}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="cursor-pointer hover:bg-gray-50 select-none"
+                      onClick={() => handleSort('customer_name_whatsapp')}
+                    >
+                      <div className="flex items-center gap-2">
+                        Nome WhatsApp
+                        {sortColumn === 'customer_name_whatsapp' && (
+                          <span>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                        )}
+                      </div>
+                    </TableHead>
+                    <TableHead>Telefone</TableHead>
+                    <TableHead 
+                      className="cursor-pointer hover:bg-gray-50 select-none text-center"
+                      onClick={() => handleSort('messages_sent')}
+                    >
+                      <div className="flex items-center justify-center gap-2">
+                        Enviadas
+                        {sortColumn === 'messages_sent' && (
+                          <span>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                        )}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="cursor-pointer hover:bg-gray-50 select-none text-center"
+                      onClick={() => handleSort('messages_received')}
+                    >
+                      <div className="flex items-center justify-center gap-2">
+                        Recebidas
+                        {sortColumn === 'messages_received' && (
+                          <span>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                        )}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="cursor-pointer hover:bg-gray-50 select-none"
+                      onClick={() => handleSort('last_message_time')}
+                    >
+                      <div className="flex items-center gap-2">
+                        Última Mensagem
+                        {sortColumn === 'last_message_time' && (
+                          <span>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                        )}
+                      </div>
+                    </TableHead>
+                    <TableHead className="w-32">Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
               <TableBody>
                 {getPaginatedConversations().map(conversation => (
                   <TableRow key={conversation.id}>
@@ -1893,7 +2073,9 @@ const ReportDetailedConversations: React.FC = () => {
                                   >
                                     <div className="flex justify-between items-start mb-1">
                                       <span className="text-sm">
-                                        {message.is_from_me ? 'Agente' : message.sender_name || 'Cliente'}
+                                        {message.is_from_me 
+                                          ? (selectedConversation?.user_name || 'Agente') 
+                                          : (message.sender_name || 'Cliente')}
                                       </span>
                                       <span className="text-xs text-gray-500">
                                         {format(new Date(message.created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
@@ -1924,6 +2106,7 @@ const ReportDetailedConversations: React.FC = () => {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>

@@ -130,6 +130,7 @@ export default function Rules() {
   const [viewChatId, setViewChatId] = useState<string | null>(null);
   const [chatDetail, setChatDetail] = useState<ConversationDetail | null>(null);
   const [chatDetailLoading, setChatDetailLoading] = useState(false);
+  const [highlightKeyword, setHighlightKeyword] = useState<string | null>(null);
   
   // Novos estados para melhorias
   const [metrics, setMetrics] = useState<RuleMetrics | null>(null);
@@ -197,7 +198,44 @@ export default function Rules() {
     try {
       setLoading(true);
       const data = await RulesService.getRules(user?.id);
-      setRules(data);
+      console.log('🔍 [Rules] Regras carregadas:', data);
+      
+      // ✅ CORREÇÃO: Garantir que keywords seja sempre um array
+      const processedData = (data || []).map(rule => {
+        let keywords = rule.keywords;
+        
+        // Se keywords for uma string, tentar fazer parse
+        if (typeof keywords === 'string') {
+          try {
+            keywords = JSON.parse(keywords);
+          } catch (e) {
+            // Se não for JSON válido, tratar como array com um único elemento
+            keywords = [keywords];
+          }
+        }
+        
+        // Garantir que seja um array
+        if (!Array.isArray(keywords)) {
+          keywords = [];
+        }
+        
+        console.log(`🔍 [Rules] Regra ${rule.id} - Keywords processadas:`, keywords);
+        
+        return {
+          ...rule,
+          keywords: keywords
+        };
+      });
+      
+      processedData.forEach((rule, index) => {
+        console.log(`🔍 [Rules] Regra ${index + 1}:`, {
+          id: rule.id,
+          name: rule.name,
+          keywords: rule.keywords,
+          keywordsLength: rule.keywords?.length
+        });
+      });
+      setRules(processedData);
     } catch (error) {
       console.error('❌ Error loading rules:', error);
       toast({
@@ -425,6 +463,9 @@ export default function Rules() {
         .map(k => k.trim())
         .filter(k => k.length > 0);
 
+      console.log('🔍 [Rules] Criando regra com palavras-chave:', keywords);
+      console.log('🔍 [Rules] Campo newKeywords original:', newKeywords);
+
       if (!newRule.name || keywords.length === 0) {
         toast({
           title: 'Erro',
@@ -440,8 +481,11 @@ export default function Rules() {
         keywords: keywords
       };
 
+      console.log('🔍 [Rules] Objeto da regra a ser criada:', ruleToCreate);
+
       const createdRule = await RulesService.createRule(ruleToCreate, user?.id);
       console.log('✅ [Rules] Regra criada:', createdRule);
+      console.log('✅ [Rules] Palavras-chave da regra criada:', createdRule.keywords);
       setNewRule({ name: '', keywords: [], description: '' });
       setNewKeywords('');
       setIsCreateDialogOpen(false);
@@ -828,7 +872,9 @@ export default function Rules() {
                             <Badge variant="secondary">{occurrence.matched_keyword}</Badge>
                           </TableCell>
                           <TableCell>{occurrence.customer_name}</TableCell>
-                          <TableCell>{occurrence.customer_phone}</TableCell>
+                          <TableCell>
+                            {occurrence.customer_phone?.replace('@s.whatsapp.net', '').replace('@g.us', '') || 'N/A'}
+                          </TableCell>
                           <TableCell>{occurrence.agent_name}</TableCell>
                           <TableCell className="max-w-xs">
                             <div className="truncate" title={occurrence.message_content}>
@@ -841,6 +887,7 @@ export default function Rules() {
                               variant="outline" 
                               onClick={() => {
                                 console.log('🔍 [Rules] Botão clicado para chat:', occurrence.chat_id);
+                                setHighlightKeyword(occurrence.matched_keyword);
                                 openChatReadOnly(occurrence.chat_id);
                               }}
                             >
@@ -895,11 +942,15 @@ export default function Rules() {
                               <p className="text-sm text-muted-foreground mb-2">{rule.description}</p>
                             )}
                             <div className="flex flex-wrap gap-1">
-                              {rule.keywords.map((keyword, index) => (
-                                <Badge key={index} variant="outline" className="text-xs">
-                                  {keyword}
-                                </Badge>
-                              ))}
+                              {rule.keywords && rule.keywords.length > 0 ? (
+                                rule.keywords.map((keyword, index) => (
+                                  <Badge key={index} variant="outline" className="text-xs">
+                                    {keyword || `(vazio ${index})`}
+                                  </Badge>
+                                ))
+                              ) : (
+                                <span className="text-xs text-muted-foreground">Nenhuma palavra-chave</span>
+                              )}
                             </div>
                           </div>
                           <div className="flex gap-2">
@@ -1112,8 +1163,13 @@ export default function Rules() {
         {/* Dialog de Detalhes da Conversa */}
         <ReportConversationDetail
           open={!!viewChatId}
-          onClose={() => { setViewChatId(null); setChatDetail(null); }}
+          onClose={() => { 
+            setViewChatId(null); 
+            setChatDetail(null);
+            setHighlightKeyword(null);
+          }}
           detail={chatDetail}
+          highlightKeyword={highlightKeyword}
           onExport={(format) => {
             console.log('Exportar em formato:', format);
             // Implementar exportação se necessário

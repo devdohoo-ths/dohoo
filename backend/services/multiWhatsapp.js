@@ -3518,9 +3518,16 @@ async function handleMessagesUpsert(m, accountId, accountName, sock) {
     for (const message of m.messages || []) {
       // ✅ Verificar filtros
       const isOwnMessage = message.key?.fromMe;
+      const senderJid = message.key?.remoteJid;
       const isStatusBroadcast = message.key?.remoteJid === 'status@broadcast';
       const isSystemMessage = isStatusMessage(message);
       const isNotifyType = m.type === 'notify';
+
+      // ✅ CRÍTICO: Ignorar mensagens de newsletter/updates ANTES de qualquer processamento
+      if (senderJid && (senderJid.includes('@newsletter') || senderJid.includes('@updates'))) {
+        console.log(`🚫 [${accountName}] Mensagem de newsletter/updates ignorada no handleMessagesUpsert: ${senderJid}`);
+        continue; // Não processar mensagens de newsletter/updates
+      }
 
       // ✅ Ignorar mensagens de status
       if (isStatusBroadcast) {
@@ -3548,6 +3555,13 @@ async function processReceivedMessage(message, accountId, accountName, sock) {
   try {
     const senderJid = message.key?.remoteJid;
     const isOwnMessage = message.key?.fromMe;
+
+    // ✅ CRÍTICO: Ignorar mensagens de newsletter/updates do WhatsApp
+    // Esses chats não devem ser salvos no sistema
+    if (senderJid && (senderJid.includes('@newsletter') || senderJid.includes('@updates'))) {
+      console.log(`🚫 [${accountName}] Mensagem de newsletter/updates ignorada: ${senderJid}`);
+      return; // Não processar mensagens de newsletter/updates
+    }
 
     // ✅ CORREÇÃO: Verificar se é mensagem de broadcast (lista de transmissão) - apenas se realmente for broadcast
     // Broadcast no WhatsApp tem formato específico: termina com "@broadcast" mas não é "status@broadcast"
@@ -3592,6 +3606,12 @@ async function processReceivedMessage(message, accountId, accountName, sock) {
     // ✅ CORREÇÃO: Lógica específica para mensagens próprias
     let targetJid, contactInfo, phoneNumber, contactName;
 
+    // ✅ CRÍTICO: Validar senderJid ANTES de determinar targetJid
+    if (senderJid && (senderJid.includes('@newsletter') || senderJid.includes('@updates'))) {
+      console.log(`🚫 [${accountName}] senderJid é newsletter/updates, ignorando: ${senderJid}`);
+      return; // Não processar mensagens de newsletter/updates
+    }
+
     if (isOwnMessage) {
       // ✅ CORREÇÃO CRÍTICA: Quando senderJid termina com @lid, não conseguimos identificar o destinatário diretamente
       // O @lid pode indicar que é uma mensagem enviada do próprio dispositivo (celular)
@@ -3635,6 +3655,12 @@ async function processReceivedMessage(message, accountId, accountName, sock) {
         });
       }
     } else {
+      // ✅ CRÍTICO: Validar senderJid antes de processar mensagem recebida
+      if (senderJid && (senderJid.includes('@newsletter') || senderJid.includes('@updates'))) {
+        console.log(`🚫 [${accountName}] Mensagem recebida de newsletter/updates ignorada: ${senderJid}`);
+        return; // Não processar mensagens de newsletter/updates
+      }
+
       // ✅ CORREÇÃO CRÍTICA: Verificar se senderJid termina com @lid mesmo que isOwnMessage seja false
       // Isso acontece quando a mensagem é enviada do próprio celular (não do WhatsApp Web)
       if (senderJid?.endsWith('@lid')) {
@@ -3887,6 +3913,12 @@ async function processReceivedMessage(message, accountId, accountName, sock) {
       return;
     }
 
+    // ✅ CRÍTICO: Validar targetJid ANTES de buscar ou criar chat
+    if (targetJid && (targetJid.includes('@newsletter') || targetJid.includes('@updates'))) {
+      console.log(`🚫 [${accountName}] targetJid é newsletter/updates, ignorando: ${targetJid}`);
+      return; // Não processar mensagens de newsletter/updates
+    }
+
     let chatId;
     if (existingChat) {
       chatId = existingChat.id;
@@ -3906,22 +3938,20 @@ async function processReceivedMessage(message, accountId, accountName, sock) {
           .eq('id', chatId);
       }
 
-      // ✅ CORREÇÃO: Atualizar informações do contato se necessário
-      // ✅ Atualizar nome apenas se:
-      // 1. Tem um nome válido (não é apenas número)
-      // 2. O nome mudou
-      // 3. Não é mensagem própria (para evitar atualizar com nome do usuário)
-      const hasValidName = contactInfo.name && 
-                          contactInfo.name !== phoneNumber && 
-                          !/^\d+$/.test(contactInfo.name.trim()) &&
-                          !isOwnMessage;
-      const nameChanged = hasValidName && contactInfo.name !== existingChat.name;
+      // ✅ CRÍTICO: Validar que o targetJid não é newsletter/updates antes de atualizar
+      if (targetJid && (targetJid.includes('@newsletter') || targetJid.includes('@updates'))) {
+        console.log(`🚫 [${accountName}] Tentativa de atualizar chat com newsletter/updates bloqueada: ${targetJid}`);
+        return; // Não atualizar chat para newsletter/updates
+      }
+
+      // ✅ CORREÇÃO: NÃO atualizar nome se o chat já existe e tem um nome válido
+      // ✅ Apenas atualizar avatar se necessário
+      // ✅ O nome do cliente deve ser mantido quando o chat já existe
       const needsAvatarUpdate = contactInfo.profilePicture && !existingChat.avatar_url;
       
-      if (nameChanged || needsAvatarUpdate || needsJidUpdate) {
-        if (nameChanged) {
-          console.log(`🔄 [${accountName}] Atualizando nome do chat: ${existingChat.name} → ${contactInfo.name}`);
-        }
+      // ✅ Só atualizar se precisar corrigir JID ou atualizar avatar
+      // ✅ NÃO atualizar o nome quando o chat já existe
+      if (needsAvatarUpdate || needsJidUpdate) {
         if (needsAvatarUpdate) {
           console.log(`🖼️ [${accountName}] Atualizando foto do chat: ${contactInfo.profilePicture}`);
         }
@@ -3929,7 +3959,7 @@ async function processReceivedMessage(message, accountId, accountName, sock) {
         await supabase
           .from('chats')
           .update({
-            name: hasValidName ? contactInfo.name : existingChat.name, // ✅ Só atualizar se tiver nome válido
+            name: existingChat.name, // ✅ MANTER o nome existente sempre
             avatar_url: contactInfo.profilePicture || existingChat.avatar_url,
             whatsapp_jid: targetJid, // ✅ Sempre garantir que está correto
             is_group: false
@@ -3937,6 +3967,12 @@ async function processReceivedMessage(message, accountId, accountName, sock) {
           .eq('id', chatId);
       }
     } else {
+      // ✅ CRÍTICO: Validar novamente antes de criar chat (segurança dupla)
+      if (!targetJid || targetJid.includes('@newsletter') || targetJid.includes('@updates')) {
+        console.log(`🚫 [${accountName}] Tentativa de criar chat para newsletter/updates bloqueada: ${targetJid}`);
+        return; // Não criar chat para newsletter/updates
+      }
+
       // ✅ CORREÇÃO: Ao criar chat novo ao receber mensagem do cliente
       // ✅ Usar nome do cliente se disponível e válido, senão usar número
       // ✅ Validar se o nome não é apenas um número ou nome do próprio usuário
@@ -3946,7 +3982,8 @@ async function processReceivedMessage(message, accountId, accountName, sock) {
           contactInfo.name !== phoneNumber && 
           !/^\d+$/.test(contactInfo.name.trim()) &&
           !isOwnMessage) { // ✅ Só usar nome se não for mensagem própria
-        finalChatName = contactInfo.name;
+        // ✅ REMOVER prefixo "Contato" se presente
+        finalChatName = contactInfo.name.replace(/^Contato\s+/i, '').trim();
         console.log(`✅ [${accountName}] Usando nome do cliente: ${finalChatName}`);
       } else {
         console.log(`📱 [${accountName}] Usando número do cliente: ${finalChatName} (nome será atualizado quando disponível)`);
@@ -5429,6 +5466,12 @@ export async function saveBroadcastMessage(message, accountId, accountName, sock
     for (const recipient of detectedRecipients) {
       const { jid: recipientJid, phone: phoneNumber } = recipient;
 
+      // ✅ CRÍTICO: Ignorar destinatários de newsletter/updates
+      if (recipientJid && (recipientJid.includes('@newsletter') || recipientJid.includes('@updates'))) {
+        console.log(`🚫 [BROADCAST SAVE] Destinatário newsletter/updates ignorado: ${recipientJid}`);
+        continue; // Pular este destinatário
+      }
+
       // Buscar chat existente para este destinatário
       let { data: existingChat, error: chatError } = await supabase
         .from('chats')
@@ -5759,6 +5802,12 @@ export const getQRCodeFromCache = async (accountId) => {
 // ✅ NOVA FUNÇÃO: Processar mensagens individuais enviadas
 async function processBroadcastSent(message, toJid, accountId, accountName, sock) {
   console.log(`📤 [INDIVIDUAL SAVE] Salvando mensagem individual para ${toJid}`);
+
+  // ✅ CRÍTICO: Ignorar mensagens para newsletter/updates
+  if (toJid && (toJid.includes('@newsletter') || toJid.includes('@updates'))) {
+    console.log(`🚫 [${accountName}] Tentativa de salvar mensagem para newsletter/updates ignorada: ${toJid}`);
+    return;
+  }
 
   try {
     // Buscar dados da conta

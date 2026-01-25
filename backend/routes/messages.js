@@ -48,14 +48,15 @@ router.get('/', auth, async (req, res) => {
       dateEnd, 
       limit: limitParam,
       keyword,
-      agents // Filtro por agentes (user_id)
+      agents, // Filtro por agentes (user_id)
+      chat_id // ✅ NOVO: Filtro por chat_id específico (CRÍTICO PARA SEGURANÇA)
     } = req.query;
 
     // ✅ Limitar o máximo de resultados para evitar problemas de performance
     const maxLimit = 10000; // Limite máximo seguro
     const limit = Math.min(parseInt(limitParam) || 1000, maxLimit);
 
-    console.log('🔍 [API] Parâmetros recebidos:', { organization_id, dateStart, dateEnd, limit, keyword, agents });
+    console.log('🔍 [API] Parâmetros recebidos:', { organization_id, dateStart, dateEnd, limit, keyword, agents, chat_id });
 
     // ✅ Usar organization_id do parâmetro ou do usuário
     const targetOrganizationId = organization_id || user.organization_id;
@@ -140,16 +141,45 @@ router.get('/', auth, async (req, res) => {
       }
     }
 
+    // ✅ CRÍTICO: Filtro por chat_id específico (SEGURANÇA - deve ser aplicado primeiro)
+    if (chat_id) {
+      console.log('🔒 [API] Filtrando mensagens por chat_id específico:', chat_id);
+      // ✅ VALIDAÇÃO DE SEGURANÇA: Verificar se o chat pertence à organização do usuário
+      const { data: chatValidation, error: chatValidationError } = await supabaseAdmin
+        .from('chats')
+        .select('id, organization_id, assigned_agent_id')
+        .eq('id', chat_id)
+        .eq('organization_id', targetOrganizationId)
+        .single();
+      
+      if (chatValidationError || !chatValidation) {
+        console.error('🚨 [API] Tentativa de acessar chat de outra organização bloqueada:', {
+          chat_id,
+          user_organization: targetOrganizationId,
+          error: chatValidationError?.message
+        });
+        return res.status(403).json({ 
+          success: false, 
+          error: 'Chat não encontrado ou acesso negado' 
+        });
+      }
+      
+      // ✅ APLICAR FILTRO: Apenas mensagens deste chat específico
+      messagesQuery = messagesQuery.eq('chat_id', chat_id);
+      console.log('✅ [API] Filtro por chat_id aplicado com sucesso');
+    }
+
     // ✅ Filtro por keyword (busca no conteúdo)
     if (keyword && keyword.trim()) {
       messagesQuery = messagesQuery.ilike('content', `%${keyword.trim()}%`);
     }
 
-    // ✅ Determinar chatIds para filtro (se necessário)
+    // ✅ Determinar chatIds para filtro (se necessário) - APENAS SE NÃO HOUVER chat_id específico
     let chatIds = null;
     
     // ✅ Filtro por agente: Se for agente, filtrar mensagens de conversas atribuídas a ele
-    if (isAgent) {
+    // ⚠️ IMPORTANTE: Não aplicar se já foi filtrado por chat_id específico
+    if (isAgent && !chat_id) {
       const { data: agentChats, error: chatsError } = await supabaseAdmin
         .from('chats')
         .select('id')
@@ -165,8 +195,8 @@ router.get('/', auth, async (req, res) => {
       }
     }
 
-    // ✅ Filtro por agentes específicos (se fornecido)
-    if (agents && agents.trim()) {
+    // ✅ Filtro por agentes específicos (se fornecido) - APENAS SE NÃO HOUVER chat_id específico
+    if (agents && agents.trim() && !chat_id) {
       const agentIds = agents.split(',').map(id => id.trim());
       const { data: agentChats, error: chatsError } = await supabaseAdmin
         .from('chats')
@@ -206,6 +236,21 @@ router.get('/', auth, async (req, res) => {
         console.error('❌ [API] Detalhes completos:', JSON.stringify(messagesError, null, 2));
       } else {
         console.log(`✅ [API] Query executada com sucesso. Mensagens encontradas: ${messages.length}`);
+        if (chat_id) {
+          // ✅ VALIDAÇÃO: Verificar se todas as mensagens pertencem ao chat_id correto
+          const invalidMessages = messages.filter(m => m.chat_id !== chat_id);
+          if (invalidMessages.length > 0) {
+            console.error(`🚨 [SEGURANÇA] ${invalidMessages.length} mensagens de outros chats detectadas!`, {
+              expectedChatId: chat_id,
+              invalidMessages: invalidMessages.map(m => ({ id: m.id, chat_id: m.chat_id }))
+            });
+            // Filtrar mensagens inválidas
+            messages = messages.filter(m => m.chat_id === chat_id);
+            console.log(`✅ [SEGURANÇA] Mensagens filtradas. Total válido: ${messages.length}`);
+          } else {
+            console.log(`✅ [SEGURANÇA] Todas as ${messages.length} mensagens pertencem ao chat_id correto`);
+          }
+        }
       }
     } catch (queryError) {
       console.error('❌ [API] Exceção ao executar query:', queryError);
@@ -333,14 +378,15 @@ router.get('/recent', auth, async (req, res) => {
     let isAgent = false;
     
     try {
-      const { data: userProfile, error: profileError } = await supabase
+      // ✅ CORREÇÃO: Usar supabaseAdmin para garantir acesso completo
+      const { data: userProfile, error: profileError } = await supabaseAdmin
         .from('profiles')
         .select('role_id')
         .eq('id', user.id)
         .single();
 
       if (!profileError && userProfile?.role_id) {
-        const { data: role, error: roleError } = await supabase
+        const { data: role, error: roleError } = await supabaseAdmin
           .from('roles')
           .select('name')
           .eq('id', userProfile.role_id)
@@ -352,10 +398,11 @@ router.get('/recent', auth, async (req, res) => {
       }
     } catch (error) {
       // Erro silencioso
+      console.error('❌ [API] Erro ao verificar role do usuário:', error);
     }
 
-    // Buscar mensagens recentes da organização
-    let messagesQuery = supabase
+    // ✅ CORREÇÃO: Usar supabaseAdmin para garantir acesso completo
+    let messagesQuery = supabaseAdmin
       .from('messages')
       .select(`
         id,
@@ -376,8 +423,8 @@ router.get('/recent', auth, async (req, res) => {
     
     // 🎯 FILTRO POR AGENTE: Se for agente, filtrar mensagens de conversas atribuídas a ele
     if (isAgent) {
-      // Buscar IDs das conversas atribuídas ao agente
-      const { data: agentChats, error: chatsError } = await supabase
+      // ✅ CORREÇÃO: Usar supabaseAdmin para garantir acesso completo
+      const { data: agentChats, error: chatsError } = await supabaseAdmin
         .from('chats')
         .select('id')
         .eq('organization_id', targetOrganizationId)
@@ -409,7 +456,12 @@ router.get('/recent', auth, async (req, res) => {
     const { data: messages, error: messagesError } = await messagesQuery;
 
     if (messagesError) {
-      return res.status(500).json({ error: 'Erro interno do servidor' });
+      console.error('❌ [API] Erro ao buscar mensagens recentes:', messagesError);
+      return res.status(500).json({ 
+        success: false,
+        error: 'Erro ao buscar mensagens recentes',
+        details: messagesError.message 
+      });
     }
 
     // Processar mensagens para o formato esperado
@@ -431,7 +483,12 @@ router.get('/recent', auth, async (req, res) => {
     });
 
   } catch (error) {
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    console.error('❌ [API] Erro completo ao buscar mensagens recentes:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Erro interno do servidor',
+      details: error.message 
+    });
   }
 });
 

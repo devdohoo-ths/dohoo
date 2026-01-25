@@ -1,31 +1,32 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import Sidebar from '@/components/layout/Sidebar';
 import { Header } from '@/components/layout/Header';
-import ChatDashboard from '@/components/chat/ChatDashboard';
-import { Dashboard } from '@/components/Dashboard';
-import AccountsPage from '@/components/accounts/AccountsPage';
-import AIAssistants from '@/components/ai/AIAssistants';
-import AIPlayground from '@/components/ai/AIPlayground';
-import { AnalyticsDashboard } from '@/components/analytics/AnalyticsDashboard';
-import SettingsPage from '@/components/settings/SettingsPage';
-import UserSettings from '@/pages/settings/UserSettings';
-import RegisterUser from '@/components/users/RegisterUser';
-import OrganizationsPage from './OrganizationsPage';
-import GoogleIntegration from '@/components/settings/GoogleIntegration';
-import GoogleConnect from '@/components/settings/GoogleConnect';
-import SchedulingSettings from '@/components/settings/SchedulingSettings';
-import AgentLimitsPage from '@/pages/settings/AgentLimits';
-import Rules from './Rules';
-import DepartmentsPage from '@/components/groups/DepartmentsPage';
-import DatabaseManagerPage from './DatabaseManagerPage';
-import { MarketplacePage } from './MarketplacePage';
-import AdvancedSettings from './settings/AdvancedSettings';
-import SystemLogs from './settings/SystemLogs';
-import WhatsAppAuditPage from './settings/WhatsAppAuditPage';
-import { OrganizationSettings } from '@/components/settings/OrganizationSettings';
-import BlacklistPage from './BlacklistPage';
-import ContactsPage from './Contacts';
-import CDRPage from './CDRPage';
+// ✅ OTIMIZADO: Lazy loading para componentes principais (reduz bundle inicial)
+const ChatDashboard = lazy(() => import('@/components/chat/ChatDashboard'));
+const Dashboard = lazy(() => import('@/components/Dashboard').then(m => ({ default: m.Dashboard })));
+const AccountsPage = lazy(() => import('@/components/accounts/AccountsPage'));
+const AIAssistants = lazy(() => import('@/components/ai/AIAssistants'));
+const AIPlayground = lazy(() => import('@/components/ai/AIPlayground').then(m => ({ default: m.AIPlayground })));
+const AnalyticsDashboard = lazy(() => import('@/components/analytics/AnalyticsDashboard').then(m => ({ default: m.AnalyticsDashboard })));
+const SettingsPage = lazy(() => import('@/components/settings/SettingsPage'));
+const UserSettings = lazy(() => import('@/pages/settings/UserSettings'));
+const RegisterUser = lazy(() => import('@/components/users/RegisterUser'));
+const OrganizationsPage = lazy(() => import('./OrganizationsPage'));
+const GoogleIntegration = lazy(() => import('@/components/settings/GoogleIntegration'));
+const GoogleConnect = lazy(() => import('@/components/settings/GoogleConnect'));
+const SchedulingSettings = lazy(() => import('@/components/settings/SchedulingSettings'));
+const AgentLimitsPage = lazy(() => import('@/pages/settings/AgentLimits'));
+const Rules = lazy(() => import('./Rules'));
+const DepartmentsPage = lazy(() => import('@/components/groups/DepartmentsPage'));
+const DatabaseManagerPage = lazy(() => import('./DatabaseManagerPage'));
+const MarketplacePage = lazy(() => import('./MarketplacePage').then(m => ({ default: m.MarketplacePage })));
+const AdvancedSettings = lazy(() => import('./settings/AdvancedSettings'));
+const SystemLogs = lazy(() => import('./settings/SystemLogs'));
+const WhatsAppAuditPage = lazy(() => import('./settings/WhatsAppAuditPage'));
+const OrganizationSettings = lazy(() => import('@/components/settings/OrganizationSettings').then(m => ({ default: m.OrganizationSettings })));
+const BlacklistPage = lazy(() => import('./BlacklistPage'));
+const ContactsPage = lazy(() => import('./Contacts'));
+const CDRPage = lazy(() => import('./CDRPage'));
 
 // ✅ OTIMIZAÇÃO: Lazy loading para componentes pesados de relatórios
 const ReportAttendance = lazy(() => import('./report-attendance'));
@@ -201,11 +202,27 @@ const Index = () => {
     
     return (
       <Routes>
-        <Route path="dashboard" element={<Dashboard />} />
-        <Route path="contacts" element={<ContactsPage />} />
+        <Route path="dashboard" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <Dashboard />
+          </Suspense>
+        } />
+        <Route path="contacts" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <ContactsPage />
+          </Suspense>
+        } />
         {/* <Route path="ranking" element={<RankingPage />} /> */}
-        <Route path="chat" element={<ChatDashboard />} />
-        <Route path="chat/:chatId" element={<ChatDashboard />} />
+        <Route path="chat" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <ChatDashboard />
+          </Suspense>
+        } />
+        <Route path="chat/:chatId" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <ChatDashboard />
+          </Suspense>
+        } />
         
         {/* Rotas das Métricas WhatsApp - Lazy Loaded */}
         <Route path="whatsapp-overview" element={
@@ -238,19 +255,71 @@ const Index = () => {
             <ManagerReport />
           </Suspense>
         } />
-        <Route path="accounts" element={<AccountsPage />} />
-        <Route path="ai-assistants" element={<AIAssistants />} />
-        <Route path="ai-playground" element={<AIPlayground setActiveTab={() => {}} />} />
-        <Route path="settings/agent-limits" element={<AgentLimitsPage />} />
-        <Route path="departments" element={<DepartmentsPage />} />
-        <Route path="blacklist" element={<BlacklistPage />} />
-        <Route path="database-manager/*" element={<DatabaseManagerPage />} />
-        <Route path="google-connect" element={<GoogleConnect />} />
-        <Route path="google-integration" element={<GoogleIntegration />} />
-        <Route path="scheduling-settings" element={<SchedulingSettings />} />
-        <Route path="user-settings" element={<UserSettings />} />
-        <Route path="register-user" element={<RegisterUser />} />
-        <Route path="organizations" element={<OrganizationsPage />} />
+        <Route path="accounts" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <AccountsPage />
+          </Suspense>
+        } />
+        <Route path="ai-assistants" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <AIAssistants />
+          </Suspense>
+        } />
+        <Route path="ai-playground" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <AIPlayground setActiveTab={() => {}} />
+          </Suspense>
+        } />
+        <Route path="settings/agent-limits" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <AgentLimitsPage />
+          </Suspense>
+        } />
+        <Route path="departments" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <DepartmentsPage />
+          </Suspense>
+        } />
+        <Route path="blacklist" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <BlacklistPage />
+          </Suspense>
+        } />
+        <Route path="database-manager/*" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <DatabaseManagerPage />
+          </Suspense>
+        } />
+        <Route path="google-connect" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <GoogleConnect />
+          </Suspense>
+        } />
+        <Route path="google-integration" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <GoogleIntegration />
+          </Suspense>
+        } />
+        <Route path="scheduling-settings" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <SchedulingSettings />
+          </Suspense>
+        } />
+        <Route path="user-settings" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <UserSettings />
+          </Suspense>
+        } />
+        <Route path="register-user" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <RegisterUser />
+          </Suspense>
+        } />
+        <Route path="organizations" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <OrganizationsPage />
+          </Suspense>
+        } />
         <Route path="report-attendance" element={
           <Suspense fallback={<LoadingFallback />}>
             <ReportAttendance />
@@ -291,9 +360,21 @@ const Index = () => {
             <HeatmapGeographic />
           </Suspense>
         } />
-        <Route path="rules" element={<Rules />} />
-        <Route path="rules/report" element={<Rules />} />
-        <Route path="cdr" element={<CDRPage />} />
+        <Route path="rules" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <Rules />
+          </Suspense>
+        } />
+        <Route path="rules/report" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <Rules />
+          </Suspense>
+        } />
+        <Route path="cdr" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <CDRPage />
+          </Suspense>
+        } />
         <Route path="campanhas" element={
           <Suspense fallback={<LoadingFallback />}>
             <CampanhasPage />
@@ -305,10 +386,26 @@ const Index = () => {
           </Suspense>
         } />
         {/* <Route path="productivity" element={<ProductivityReport />} /> */}
-        <Route path="settings/advanced" element={<AdvancedSettings />} />
-        <Route path="settings/organization" element={<OrganizationSettings />} />
-        <Route path="system-logs" element={<SystemLogs />} />
-        <Route path="whatsapp-audit" element={<WhatsAppAuditPage />} />
+        <Route path="settings/advanced" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <AdvancedSettings />
+          </Suspense>
+        } />
+        <Route path="settings/organization" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <OrganizationSettings />
+          </Suspense>
+        } />
+        <Route path="system-logs" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <SystemLogs />
+          </Suspense>
+        } />
+        <Route path="whatsapp-audit" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <WhatsAppAuditPage />
+          </Suspense>
+        } />
         
         {/* Rotas do Módulo de Atendimento Inteligente - ARQUIVADAS */}
         {/* <Route path="product-dashboard" element={<ProductDashboard />} /> */}

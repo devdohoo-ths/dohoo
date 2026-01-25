@@ -361,28 +361,35 @@ export const AppDataProvider: React.FC<AppDataProviderProps> = ({ children }) =>
   }, [organizationId]);
 
   /**
-   * Carrega todos os dados iniciais
+   * ✅ OTIMIZADO: Carrega dados críticos primeiro, não-críticos depois
    */
   const loadAllData = useCallback(async (force = false) => {
     if (!organizationId || !user?.id) return;
 
     setState(prev => ({ ...prev, initialized: false }));
 
-    // Carregar em paralelo
+    // ✅ FASE 1: Carregar dados críticos primeiro (necessários para renderização inicial)
     await Promise.all([
-      loadOrganization(),
-      loadDashboardStats(force),
-      loadWhatsAppAccounts(force),
-      loadTeams(force),
-      loadAIData(force)
+      loadOrganization(), // Crítico - usado em vários lugares
+      loadWhatsAppAccounts(force) // Crítico - usado no chat
     ]);
 
+    // ✅ FASE 2: Marcar como inicializado para permitir renderização
     setState(prev => ({ 
       ...prev, 
       initialized: true, 
       lastRefresh: Date.now(),
       userRole: profile?.roles?.name || null
     }));
+
+    // ✅ FASE 3: Carregar dados não-críticos depois (com delay para não bloquear)
+    setTimeout(async () => {
+      await Promise.all([
+        loadDashboardStats(force), // Não-crítico - pode carregar depois
+        loadTeams(force), // Não-crítico - usado apenas em algumas páginas
+        loadAIData(force) // Não-crítico - usado apenas em páginas de IA
+      ]);
+    }, 100); // Pequeno delay de 100ms para não bloquear renderização
   }, [organizationId, user?.id, profile?.roles?.name, loadOrganization, loadDashboardStats, loadWhatsAppAccounts, loadTeams, loadAIData]);
 
   // Carregar dados quando o usuário fizer login

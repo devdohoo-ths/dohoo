@@ -1642,6 +1642,13 @@ const processWhatsAppWebReceivedMessage = async (message, accountId, accountName
     const isOwnMessage = message.key?.fromMe;
     const originalWaMessage = message._waOriginal || message;
 
+    // ✅ CRÍTICO: Ignorar mensagens de newsletter/updates do WhatsApp
+    // Esses chats não devem ser salvos no sistema
+    if (senderJid && (senderJid.includes('@newsletter') || senderJid.includes('@updates'))) {
+      console.log(`🚫 [${accountName}] Mensagem de newsletter/updates ignorada: ${senderJid}`);
+      return; // Não processar mensagens de newsletter/updates
+    }
+
     // ✅ CORREÇÃO: Verificar se é mensagem de broadcast (lista de transmissão) - apenas se realmente for broadcast
     const isBroadcast = ((senderJid?.endsWith('@broadcast') && senderJid !== 'status@broadcast') ||
                         (originalWaMessage?.from?.endsWith('@broadcast') && originalWaMessage?.from !== 'status@broadcast')) &&
@@ -1750,27 +1757,31 @@ const processWhatsAppWebReceivedMessage = async (message, accountId, accountName
       chatId = existingChat.id;
       console.log(`📨 [${accountName}] Chat existente: ${chatId}`);
 
-      // ✅ CORREÇÃO: Atualizar informações do contato se necessário
-      // ✅ Atualizar nome apenas se:
-      // 1. Tem um nome válido (não é apenas número)
-      // 2. O nome mudou
-      // 3. Não é mensagem própria (para evitar atualizar com nome do usuário)
-      const hasValidName = contactInfo.name && 
-                          contactInfo.name !== phoneNumber && 
-                          !/^\d+$/.test(contactInfo.name.trim()) &&
-                          !isOwnMessage;
-      if (hasValidName && contactInfo.name !== existingChat.name) {
-        console.log(`🔄 [${accountName}] Atualizando nome do chat: ${existingChat.name} → ${contactInfo.name}`);
+      // ✅ CORREÇÃO: NÃO atualizar nome se o chat já existe e tem um nome válido
+      // ✅ Apenas atualizar avatar se necessário
+      // ✅ O nome do cliente deve ser mantido quando o chat já existe
+      const needsAvatarUpdate = contactInfo.profilePicture && !existingChat.avatar_url;
+      
+      // ✅ Só atualizar se precisar atualizar avatar
+      // ✅ NÃO atualizar o nome quando o chat já existe
+      if (needsAvatarUpdate) {
+        console.log(`🖼️ [${accountName}] Atualizando foto do chat: ${contactInfo.profilePicture}`);
         await supabase
           .from('chats')
           .update({
-            name: contactInfo.name,
+            name: existingChat.name, // ✅ MANTER o nome existente sempre
             avatar_url: contactInfo.profilePicture || existingChat.avatar_url,
             is_group: false
           })
           .eq('id', chatId);
       }
     } else {
+      // ✅ CRÍTICO: Validar novamente antes de criar chat (segurança dupla)
+      if (!targetJid || targetJid.includes('@newsletter') || targetJid.includes('@updates')) {
+        console.log(`🚫 [${accountName}] Tentativa de criar chat para newsletter/updates bloqueada: ${targetJid}`);
+        return; // Não criar chat para newsletter/updates
+      }
+
       // ✅ CORREÇÃO: Ao criar chat novo ao receber mensagem do cliente
       // ✅ Usar nome do cliente se disponível e válido, senão usar número
       let finalChatName = phoneNumber; // Padrão: usar número
@@ -1779,7 +1790,8 @@ const processWhatsAppWebReceivedMessage = async (message, accountId, accountName
           contactInfo.name !== phoneNumber && 
           !/^\d+$/.test(contactInfo.name.trim()) &&
           !isOwnMessage) { // ✅ Só usar nome se não for mensagem própria
-        finalChatName = contactInfo.name;
+        // ✅ REMOVER prefixo "Contato" se presente
+        finalChatName = contactInfo.name.replace(/^Contato\s+/i, '').trim();
         console.log(`✅ [${accountName}] Usando nome do cliente: ${finalChatName}`);
       } else {
         console.log(`📱 [${accountName}] Usando número do cliente: ${finalChatName} (nome será atualizado quando disponível)`);

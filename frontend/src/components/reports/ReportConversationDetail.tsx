@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -34,6 +34,7 @@ interface ReportConversationDetailProps {
   open: boolean;
   onClose: () => void;
   detail: ConversationDetail | null;
+  highlightKeyword?: string | null;
   onExport: (format: 'pdf' | 'excel') => void;
   onAnalyzeAI: () => void;
   loading?: boolean;
@@ -268,6 +269,7 @@ export const ReportConversationDetail: React.FC<ReportConversationDetailProps> =
   open,
   onClose,
   detail,
+  highlightKeyword,
   onExport,
   onAnalyzeAI,
   loading = false
@@ -277,6 +279,31 @@ export const ReportConversationDetail: React.FC<ReportConversationDetailProps> =
   const [emailAddress, setEmailAddress] = useState('');
   const [sendingEmail, setSendingEmail] = useState(false);
   const { toast } = useToast();
+  const messageRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Rolar até a mensagem com a palavra-chave quando o modal abrir
+  // ✅ CORREÇÃO: Mover useEffect antes dos returns condicionais para seguir as regras dos hooks
+  useEffect(() => {
+    if (open && highlightKeyword && detail?.messages && detail.messages.length > 0) {
+      // Aguardar um pouco para garantir que o DOM foi renderizado
+      setTimeout(() => {
+        // Encontrar a primeira mensagem que contém a palavra-chave
+        const keywordLower = highlightKeyword.toLowerCase().trim();
+        const targetMessage = detail.messages.find(msg => {
+          const content = (msg.content || '').toLowerCase();
+          return content.includes(keywordLower);
+        });
+        
+        if (targetMessage && messageRefs.current[targetMessage.id]) {
+          messageRefs.current[targetMessage.id]?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center'
+          });
+        }
+      }, 300);
+    }
+  }, [open, highlightKeyword, detail?.messages]);
 
   // Se o modal está aberto mas não temos detalhes, mostrar loading
   if (open && !detail) {
@@ -299,6 +326,37 @@ export const ReportConversationDetail: React.FC<ReportConversationDetailProps> =
   if (!open || !detail) return null;
 
   const { conversation, messages, timeline } = detail;
+
+  // Função para destacar palavra-chave no texto
+  const highlightText = (text: string, keyword: string | null | undefined): React.ReactNode => {
+    if (!keyword || !text) return text;
+    
+    const normalizedKeyword = keyword.toLowerCase().trim();
+    const normalizedText = text.toLowerCase();
+    
+    if (!normalizedText.includes(normalizedKeyword)) {
+      return text;
+    }
+    
+    // Escapar caracteres especiais da regex
+    const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const parts = text.split(new RegExp(`(${escapedKeyword})`, 'gi'));
+    
+    return (
+      <>
+        {parts.map((part, index) => {
+          if (part.toLowerCase() === normalizedKeyword) {
+            return (
+              <span key={index} className="bg-red-500 text-white font-bold px-1 rounded">
+                {part}
+              </span>
+            );
+          }
+          return <React.Fragment key={index}>{part}</React.Fragment>;
+        })}
+      </>
+    );
+  };
 
   console.log('🔍 [Modal] Dados recebidos:', { conversation, messages: messages?.length, timeline: timeline?.length });
   console.log('🔍 [Modal] Mensagens:', messages);
@@ -440,9 +498,6 @@ export const ReportConversationDetail: React.FC<ReportConversationDetailProps> =
                   <Send className="w-4 h-4" />
                   Enviar por Email
                 </Button>
-                <Button variant="ghost" size="icon" onClick={onClose} className="hover:bg-gray-100">
-                  <span className="text-lg">×</span>
-                </Button>
               </div>
             </div>
           </div>
@@ -455,7 +510,10 @@ export const ReportConversationDetail: React.FC<ReportConversationDetailProps> =
                     Conversa ({messages?.length || 0} mensagens)
                   </h3>
                 </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
+                <div 
+                  ref={scrollContainerRef}
+                  className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0"
+                >
                   {!messages || messages.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-gray-500">
                       <MessageCircle className="h-12 w-12 mb-4" />
@@ -477,8 +535,17 @@ export const ReportConversationDetail: React.FC<ReportConversationDetailProps> =
                         const dateLabel = getDateLabel(msgDate);
                         const showDivider = dateLabel !== lastDate;
                         lastDate = dateLabel;
+                        const hasKeyword = highlightKeyword && message.content?.toLowerCase().includes(highlightKeyword.toLowerCase());
                         return (
-                          <div key={message.id}>
+                          <div 
+                            key={message.id}
+                            ref={(el) => {
+                              if (hasKeyword) {
+                                messageRefs.current[message.id] = el;
+                              }
+                            }}
+                            className={hasKeyword ? 'ring-2 ring-red-500 rounded-lg p-1' : ''}
+                          >
                             {showDivider && (
                               <div className="flex items-center my-4">
                                 <div className="flex-grow border-t border-gray-200" />
@@ -509,7 +576,9 @@ export const ReportConversationDetail: React.FC<ReportConversationDetailProps> =
                                     ? "bg-green-50 border-green-200 text-gray-800"
                                     : "bg-blue-50 border-blue-200 text-gray-800"
                                 )}>
-                                  <div className="text-sm leading-relaxed">{message.content}</div>
+                                  <div className="text-sm leading-relaxed">
+                                    {highlightKeyword ? highlightText(message.content || '', highlightKeyword) : message.content}
+                                  </div>
                                   <div className={cn(
                                     "text-xs text-gray-500 mt-2",
                                     (message as any).senderName === conversation.agentName ? "text-right" : "text-left"

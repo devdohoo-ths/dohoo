@@ -25,6 +25,8 @@ Antes de começar, certifique-se de ter instalado:
 - **Git**
 - Conta no **Supabase** (para banco de dados)
 - (Opcional) **Redis** (para cache em produção)
+  - **Linux/Mac:** Redis padrão
+  - **Windows:** [Memurai](https://www.memurai.com/) (compatível com Redis)
 
 ---
 
@@ -132,7 +134,51 @@ npm install
 
    > ⚠️ **IMPORTANTE:** APIs de IA (`OPENAI`, `ELEVEN_LABS`, etc.) devem ser configuradas **APENAS no backend**, não no frontend!
 
-### 3. Configurar Banco de Dados (Supabase)
+   **Opcionais (Cache Redis):**
+   - `REDIS_HOST` - Host do Redis/Memurai (padrão: `localhost`)
+   - `REDIS_PORT` - Porta do Redis/Memurai (padrão: `6379`)
+   - `REDIS_PASSWORD` - Senha do Redis (opcional)
+   - `REDIS_DB` - Número do banco de dados Redis (padrão: `0`)
+
+   > 💡 **Windows:** Use [Memurai](https://www.memurai.com/) como alternativa ao Redis. É totalmente compatível e funciona da mesma forma!
+
+### 3. Configurar Cache Redis/Memurai (Opcional)
+
+O sistema usa Redis/Memurai para cache inteligente, melhorando significativamente a performance. É **opcional** - o sistema funciona sem ele, mas com melhor performance quando configurado.
+
+**Windows (Memurai):**
+1. Baixe e instale [Memurai](https://www.memurai.com/get-memurai)
+2. Inicie o serviço Memurai (geralmente inicia automaticamente como serviço Windows)
+3. Configure no `.env` do backend (opcional, usa padrões se não configurar):
+   ```env
+   REDIS_HOST=localhost
+   REDIS_PORT=6379
+   ```
+
+**Linux/Mac (Redis):**
+1. Instale Redis:
+   ```bash
+   # Ubuntu/Debian
+   sudo apt-get install redis-server
+   
+   # macOS
+   brew install redis
+   ```
+2. Inicie Redis:
+   ```bash
+   # Ubuntu/Debian
+   sudo systemctl start redis-server
+   
+   # macOS
+   redis-server
+   ```
+
+**Verificar se está funcionando:**
+- O sistema detecta automaticamente se Redis/Memurai está disponível
+- Verifique os logs do backend - você verá "Redis conectado com sucesso" se estiver funcionando
+- Se não estiver disponível, o sistema continua funcionando normalmente sem cache
+
+### 4. Configurar Banco de Dados (Supabase)
 
 1. **Crie um projeto no [Supabase](https://supabase.com)**
    - Acesse https://app.supabase.com
@@ -378,6 +424,10 @@ dohoo/
 | `OPENAI_API_KEY` | ❌ Opcional | Para funcionalidades de IA |
 | `ELEVEN_LABS_API_KEY` | ❌ Opcional | Para síntese de voz |
 | `DEV_TOKEN` | ❌ Opcional | Token de desenvolvimento |
+| `REDIS_HOST` | ❌ Opcional | Host do Redis/Memurai (padrão: localhost) |
+| `REDIS_PORT` | ❌ Opcional | Porta do Redis/Memurai (padrão: 6379) |
+| `REDIS_PASSWORD` | ❌ Opcional | Senha do Redis/Memurai |
+| `REDIS_DB` | ❌ Opcional | Número do banco Redis (padrão: 0) |
 
 ### Frontend (`.env`)
 

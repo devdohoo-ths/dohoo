@@ -31,11 +31,11 @@ export const useChatOperations = (options?: UseChatOperationsOptions) => {
   // ✅ OTIMIZADO: Buscar chats com stats usando queries agregadas ao invés de N queries
   const fetchChatsWithStats = useCallback(async () => {
     try {
-      // ✅ CACHE: usar resultado recente (TTL 60s) mas invalidar se account_id mudou
+      // ✅ CACHE: usar resultado recente (TTL 120s) mas invalidar se account_id mudou
       const now = Date.now();
       const cacheValid = chatCache.data && 
                         chatCache.ts && 
-                        now - chatCache.ts < 60000 &&
+                        now - chatCache.ts < 120000 && // ✅ AUMENTADO: De 60s para 120s para reduzir requisições
                         chatCache.accountId === accountId; // ✅ NOVO: Invalidar se account_id mudou
       
       if (cacheValid) {

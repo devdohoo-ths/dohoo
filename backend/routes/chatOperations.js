@@ -173,6 +173,13 @@ router.post('/chats', async (req, res) => {
 
     // Adicionar whatsapp_jid se fornecido
     if (whatsapp_jid) {
+      // ✅ CRÍTICO: Bloquear criação de chats para newsletter/updates
+      if (whatsapp_jid.includes('@newsletter') || whatsapp_jid.includes('@updates')) {
+        console.log(`🚫 [API] Tentativa de criar chat para newsletter/updates bloqueada: ${whatsapp_jid}`);
+        return res.status(400).json({ 
+          error: 'Não é permitido criar chats para newsletter ou updates do WhatsApp' 
+        });
+      }
       newChatData.whatsapp_jid = whatsapp_jid;
     }
 

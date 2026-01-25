@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { MapPin, RefreshCw, Calendar, TrendingUp, MessageCircle, Download } from 'lucide-react';
+import { MapPin, RefreshCw, Calendar, TrendingUp, MessageCircle, Download, Eye, EyeOff } from 'lucide-react';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
@@ -73,18 +73,26 @@ const HeatmapGeographic: React.FC<HeatmapGeographicProps> = () => {
   const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [selectedState, setSelectedState] = useState<string | null>(null);
   const [maxMessages, setMaxMessages] = useState(0);
+  const [showStateLabels, setShowStateLabels] = useState(false); // Por padrão oculto
+  const [showAllStates, setShowAllStates] = useState(false); // Por padrão mostra apenas top 10
 
   // Função para extrair DDD de um número de telefone
   const extractDDD = (phone: string): string | null => {
+    if (!phone || typeof phone !== 'string') return null;
+    
+    // Remover sufixos do WhatsApp (@s.whatsapp.net, @g.us, etc)
+    let cleaned = phone.split('@')[0];
+    
     // Remove caracteres não numéricos
-    const cleaned = phone.replace(/\D/g, '');
+    cleaned = cleaned.replace(/\D/g, '');
     
     // Se começa com 55 (código do Brasil), remove
     const withoutCountry = cleaned.startsWith('55') ? cleaned.substring(2) : cleaned;
     
     // Pega os 2 primeiros dígitos (DDD)
     if (withoutCountry.length >= 2) {
-      return withoutCountry.substring(0, 2);
+      const ddd = withoutCountry.substring(0, 2);
+      return ddd;
     }
     
     return null;
@@ -112,11 +120,15 @@ const HeatmapGeographic: React.FC<HeatmapGeographicProps> = () => {
     try {
       // Buscar todas as mensagens no período via API do backend
       const headers = await getAuthHeaders();
-      const startDateISO = new Date(startDate).toISOString();
-      const endDateISO = new Date(endDate + 'T23:59:59').toISOString();
       
+      // Formatar datas corretamente (usar apenas a data sem hora para compatibilidade)
+      const startDateFormatted = startDate; // yyyy-MM-dd
+      const endDateFormatted = endDate; // yyyy-MM-dd
+      
+      // ✅ CORREÇÃO: Buscar mensagens com join de chats para obter os telefones
+      // A API pode não retornar o chat por padrão, então vamos buscar também via endpoint que retorna chats
       const response = await fetch(
-        `${apiBase}/api/messages?organization_id=${organization.id}&dateStart=${startDateISO}&dateEnd=${endDateISO}&limit=10000`,
+        `${apiBase}/api/messages?organization_id=${organization.id}&dateStart=${startDateFormatted}&dateEnd=${endDateFormatted}&limit=10000`,
         { headers }
       );
 
@@ -125,46 +137,167 @@ const HeatmapGeographic: React.FC<HeatmapGeographicProps> = () => {
       }
 
       const result = await response.json();
-      const messages = result.messages || result.data || [];
+      let messages = result.messages || result.data || [];
+
+      console.log('[Heatmap] Total de mensagens recebidas:', messages.length);
+      
+      // ✅ NOVO: Se as mensagens não têm dados do chat, buscar os chats separadamente
+      if (messages.length > 0 && !messages[0].chat && messages[0].chat_id) {
+        console.log('[Heatmap] Mensagens não têm dados do chat, buscando chats separadamente...');
+        
+        // Coletar todos os chat_ids únicos
+        const chatIds = [...new Set(messages.map((m: any) => m.chat_id).filter(Boolean))];
+        console.log('[Heatmap] Total de chats únicos:', chatIds.length);
+        
+        if (chatIds.length > 0) {
+          // Buscar chats em lotes (limite de 100 por vez devido ao tamanho da URL)
+          const batchSize = 100;
+          const chatBatches = [];
+          for (let i = 0; i < chatIds.length; i += batchSize) {
+            chatBatches.push(chatIds.slice(i, i + batchSize));
+          }
+          
+          const chatsMap = new Map();
+          
+          for (const batch of chatBatches) {
+            try {
+              const chatsResponse = await fetch(
+                `${apiBase}/api/chat-operations/chats?ids=${batch.join(',')}&organization_id=${organization.id}`,
+                { headers }
+              );
+              
+              if (chatsResponse.ok) {
+                const chatsResult = await chatsResponse.json();
+                const chats = chatsResult.chats || chatsResult.data || [];
+                chats.forEach((chat: any) => {
+                  chatsMap.set(chat.id, chat);
+                });
+              }
+            } catch (error) {
+              console.warn('[Heatmap] Erro ao buscar lote de chats:', error);
+            }
+          }
+          
+          console.log('[Heatmap] Chats encontrados:', chatsMap.size);
+          
+          // Adicionar dados do chat às mensagens
+          messages = messages.map((msg: any) => ({
+            ...msg,
+            chat: chatsMap.get(msg.chat_id) || null
+          }));
+        }
+      }
+      
+      if (messages.length > 0) {
+        console.log('[Heatmap] Primeira mensagem exemplo:', {
+          id: messages[0].id,
+          is_from_me: messages[0].is_from_me,
+          sender_jid: messages[0].sender_jid,
+          chat_id: messages[0].chat_id,
+          chat: messages[0].chat ? {
+            id: messages[0].chat.id,
+            remote_jid: messages[0].chat.remote_jid,
+            whatsapp_jid: messages[0].chat.whatsapp_jid
+          } : null
+        });
+      }
 
       // Agrupar por estado
       const stateMap: { [key: string]: { sent: number; received: number } } = {};
 
-      messages.forEach((message: any) => {
+      let processedCount = 0;
+      let skippedCount = 0;
+      let dddNotFoundCount = 0;
+
+      messages.forEach((message: any, index: number) => {
         let phoneNumber = '';
         
-        // ✅ CORREÇÃO: Determinar número de telefone baseado na direção da mensagem
-        // Para mensagens enviadas, o destinatário está em sender_jid ou no chat
-        // Para mensagens recebidas, o remetente está em sender_jid
+        // ✅ MELHORADO: Buscar telefone em múltiplos campos possíveis
+        // Tentar diferentes campos onde o telefone pode estar armazenado
         if (message.is_from_me) {
-          // Mensagem enviada - destinatário pode estar em sender_jid (que é o remoteJid) ou no chat
+          // Mensagem enviada - destinatário pode estar em vários campos
           phoneNumber = message.sender_jid || 
                        message.chat?.remote_jid || 
-                       message.chat?.whatsapp_jid || 
+                       message.chat?.whatsapp_jid ||
+                       message.remote_jid ||
+                       message.target_jid ||
+                       message.metadata?.target_jid ||
+                       message.metadata?.remote_jid ||
                        '';
         } else {
-          // Mensagem recebida - remetente está em sender_jid
+          // Mensagem recebida - remetente está em sender_jid ou outros campos
           phoneNumber = message.sender_jid || 
                        message.chat?.whatsapp_jid || 
-                       message.chat?.remote_jid || 
+                       message.chat?.remote_jid ||
+                       message.remote_jid ||
+                       message.metadata?.sender_jid ||
+                       message.metadata?.remote_jid ||
                        '';
+        }
+
+        // Se ainda não encontrou, tentar extrair do chat_id ou outros campos
+        if (!phoneNumber && message.chat_id) {
+          // Tentar extrair número do chat_id se for um número
+          const chatIdStr = String(message.chat_id);
+          if (/^\d+$/.test(chatIdStr)) {
+            phoneNumber = chatIdStr;
+          }
+        }
+
+        // Log das primeiras mensagens para debug
+        if (index < 5) {
+          console.log(`[Heatmap] Mensagem ${index + 1}:`, {
+            is_from_me: message.is_from_me,
+            phoneNumber,
+            sender_jid: message.sender_jid,
+            chat_remote_jid: message.chat?.remote_jid,
+            chat_whatsapp_jid: message.chat?.whatsapp_jid
+          });
+        }
+
+        if (!phoneNumber) {
+          skippedCount++;
+          return;
         }
 
         // Extrair DDD e mapear para estado
         const ddd = extractDDD(phoneNumber);
-        if (ddd && dddToState[ddd]) {
-          const state = dddToState[ddd];
-          
-          if (!stateMap[state]) {
-            stateMap[state] = { sent: 0, received: 0 };
-          }
-
-          if (message.is_from_me) {
-            stateMap[state].sent++;
-          } else {
-            stateMap[state].received++;
-          }
+        
+        if (index < 5) {
+          console.log(`[Heatmap] DDD extraído de "${phoneNumber}":`, ddd);
         }
+
+        if (!ddd) {
+          dddNotFoundCount++;
+          return;
+        }
+
+        if (!dddToState[ddd]) {
+          dddNotFoundCount++;
+          console.warn(`[Heatmap] DDD ${ddd} não encontrado no mapeamento`);
+          return;
+        }
+
+        const state = dddToState[ddd];
+        
+        if (!stateMap[state]) {
+          stateMap[state] = { sent: 0, received: 0 };
+        }
+
+        if (message.is_from_me) {
+          stateMap[state].sent++;
+        } else {
+          stateMap[state].received++;
+        }
+
+        processedCount++;
+      });
+
+      console.log('[Heatmap] Estatísticas de processamento:', {
+        total: messages.length,
+        processadas: processedCount,
+        puladas: skippedCount,
+        dddNaoEncontrado: dddNotFoundCount
       });
 
       // Converter para array e calcular totais
@@ -176,6 +309,9 @@ const HeatmapGeographic: React.FC<HeatmapGeographicProps> = () => {
         receivedCount: stateMap[state].received
       }));
 
+      console.log('[Heatmap] Estados encontrados:', data.length);
+      console.log('[Heatmap] Dados por estado:', data);
+
       // Ordenar por quantidade de mensagens
       data.sort((a, b) => b.messageCount - a.messageCount);
 
@@ -185,10 +321,18 @@ const HeatmapGeographic: React.FC<HeatmapGeographicProps> = () => {
 
       setStateData(data);
 
-      toast({
-        title: "Dados carregados",
-        description: `${data.length} estados com atividade encontrados`,
-      });
+      if (data.length === 0) {
+        toast({
+          title: "Nenhum dado encontrado",
+          description: `Nenhuma mensagem com telefone válido encontrada no período ${startDate} a ${endDate}`,
+          variant: "default"
+        });
+      } else {
+        toast({
+          title: "Dados carregados",
+          description: `${data.length} estados com atividade encontrados`,
+        });
+      }
     } catch (error: any) {
       console.error('Erro ao buscar dados:', error);
       toast({
@@ -205,7 +349,7 @@ const HeatmapGeographic: React.FC<HeatmapGeographicProps> = () => {
     if (organization?.id) {
       fetchHeatmapData();
     }
-  }, [organization?.id, fetchHeatmapData]);
+  }, [organization?.id, startDate, endDate, fetchHeatmapData]);
 
   // Estado para armazenar dados do GeoJSON
   const [geoJsonData, setGeoJsonData] = useState<any>(null);
@@ -317,26 +461,85 @@ const HeatmapGeographic: React.FC<HeatmapGeographicProps> = () => {
               });
             }
 
-            return paths.map((pathData, pathIndex) => (
-              <path
-                key={`${index}-${pathIndex}`}
-                d={pathData}
-                fill={fillColor}
-                stroke="#fff"
-                strokeWidth={1}
-                className="cursor-pointer transition-all hover:opacity-80"
-                onClick={() => handleStateClick(stateCode)}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.stroke = '#3b82f6';
-                  e.currentTarget.style.strokeWidth = '2';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.stroke = '#fff';
-                  e.currentTarget.style.strokeWidth = '1';
-                }}
-                style={{ cursor: 'pointer' }}
-              />
-            ));
+            // Calcular centro do estado para posicionar a sigla
+            let centerX = 0;
+            let centerY = 0;
+            let totalPoints = 0;
+            
+            if (feature.geometry.type === 'Polygon') {
+              feature.geometry.coordinates.forEach((ring: number[][]) => {
+                const projected = projectCoordinates(ring, width, height);
+                projected.forEach(([x, y]) => {
+                  centerX += x;
+                  centerY += y;
+                  totalPoints++;
+                });
+              });
+            } else if (feature.geometry.type === 'MultiPolygon') {
+              feature.geometry.coordinates.forEach((polygon: number[][][]) => {
+                polygon.forEach((ring: number[][]) => {
+                  const projected = projectCoordinates(ring, width, height);
+                  projected.forEach(([x, y]) => {
+                    centerX += x;
+                    centerY += y;
+                    totalPoints++;
+                  });
+                });
+              });
+            }
+            
+            if (totalPoints > 0) {
+              centerX = centerX / totalPoints;
+              centerY = centerY / totalPoints;
+            }
+
+            const stateSigla = state.toUpperCase();
+
+            return (
+              <g key={`state-${index}`}>
+                {paths.map((pathData, pathIndex) => (
+                  <path
+                    key={`${index}-${pathIndex}`}
+                    d={pathData}
+                    fill={fillColor}
+                    stroke="#fff"
+                    strokeWidth={1}
+                    className="cursor-pointer transition-all hover:opacity-80"
+                    onClick={() => handleStateClick(stateCode)}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.stroke = '#3b82f6';
+                      e.currentTarget.style.strokeWidth = '2';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.stroke = '#fff';
+                      e.currentTarget.style.strokeWidth = '1';
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  />
+                ))}
+                {/* Adicionar sigla do estado - apenas se showStateLabels estiver ativo */}
+                {showStateLabels && stateSigla && (
+                  <text
+                    x={centerX}
+                    y={centerY}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    className="pointer-events-none select-none"
+                    style={{
+                      fontSize: '14px',
+                      fontWeight: 'bold',
+                      fill: messageCount > 0 ? '#ffffff' : '#6b7280',
+                      textShadow: messageCount > 0 
+                        ? '1px 1px 2px rgba(0,0,0,0.5)' 
+                        : 'none',
+                      fontFamily: 'system-ui, -apple-system, sans-serif'
+                    }}
+                  >
+                    {stateSigla}
+                  </text>
+                )}
+              </g>
+            );
           })}
           </svg>
         </div>
@@ -349,102 +552,185 @@ const HeatmapGeographic: React.FC<HeatmapGeographicProps> = () => {
   return (
     <div className="p-6 space-y-6">
       {/* Cabeçalho */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl text-gray-900">Mapa de Calor Geográfico</h1>
           <p className="text-gray-600">Distribuição de mensagens por estados do Brasil</p>
         </div>
-        <Button 
-          onClick={fetchHeatmapData} 
-          variant="outline" 
-          disabled={loading}
-        >
-          <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-          Atualizar
-        </Button>
-      </div>
-
-      {/* Filtros de Data */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Calendar className="h-5 w-5" />
-            Período
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="startDate">Data Inicial</Label>
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Filtros de Data - Discretos */}
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <Calendar className="h-4 w-4 text-gray-500" />
+            <div className="flex items-center gap-2">
               <Input
                 id="startDate"
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
+                className="h-9 w-36 text-sm"
               />
-            </div>
-            <div>
-              <Label htmlFor="endDate">Data Final</Label>
+              <span className="text-gray-400">até</span>
               <Input
                 id="endDate"
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
+                className="h-9 w-36 text-sm"
               />
             </div>
           </div>
-        </CardContent>
-      </Card>
+          <Button 
+            onClick={fetchHeatmapData} 
+            variant="outline" 
+            disabled={loading}
+            className="flex items-center gap-2"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            Atualizar
+          </Button>
+        </div>
+      </div>
 
-      {/* Mapa do Brasil */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <MapPin className="h-5 w-5" />
-            Mapa do Brasil - Distribuição de Mensagens
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="flex items-center justify-center h-96">
-              <RefreshCw className="h-8 w-8 animate-spin text-blue-600" />
-              <span className="ml-2 text-lg">Carregando mapa...</span>
+      {/* Mapa e Ranking lado a lado */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Mapa do Brasil */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <MapPin className="h-5 w-5" />
+                Mapa do Brasil
+              </CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowStateLabels(!showStateLabels)}
+                className="flex items-center gap-2"
+              >
+                {showStateLabels ? (
+                  <>
+                    <EyeOff className="h-4 w-4" />
+                    Ocultar Siglas
+                  </>
+                ) : (
+                  <>
+                    <Eye className="h-4 w-4" />
+                    Mostrar Siglas
+                  </>
+                )}
+              </Button>
             </div>
-          ) : (
-            <div className="space-y-4">
-              {/* Legenda */}
-              <div className="flex items-center gap-4 text-sm flex-wrap">
-                <span className="text-gray-600 font-semibold">Intensidade:</span>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 bg-gray-300 rounded"></div>
-                  <span>Sem atividade</span>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <div className="flex items-center justify-center h-96">
+                <RefreshCw className="h-8 w-8 animate-spin text-blue-600" />
+                <span className="ml-2 text-lg">Carregando mapa...</span>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Legenda */}
+                <div className="flex items-center gap-4 text-sm flex-wrap">
+                  <span className="text-gray-600 font-semibold">Intensidade:</span>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 bg-gray-300 rounded"></div>
+                    <span>Sem atividade</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 bg-blue-400 rounded"></div>
+                    <span>Baixa</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 bg-yellow-500 rounded"></div>
+                    <span>Média</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 bg-orange-500 rounded"></div>
+                    <span>Alta</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 bg-red-600 rounded"></div>
+                    <span>Muito Alta</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 bg-blue-400 rounded"></div>
-                  <span>Baixa</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 bg-yellow-500 rounded"></div>
-                  <span>Média</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 bg-orange-500 rounded"></div>
-                  <span>Alta</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 bg-red-600 rounded"></div>
-                  <span>Muito Alta</span>
+
+                {/* Mapa SVG */}
+                <div className="border rounded-lg p-4 bg-gray-50">
+                  <BrazilMapSVG />
                 </div>
               </div>
+            )}
+          </CardContent>
+        </Card>
 
-              {/* Mapa SVG */}
-              <div className="border rounded-lg p-4 bg-gray-50">
-                <BrazilMapSVG />
-              </div>
+        {/* Ranking de Estados */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <TrendingUp className="h-5 w-5" />
+                Ranking de Estados
+              </CardTitle>
+              {stateData.length > 10 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowAllStates(!showAllStates)}
+                  className="flex items-center gap-2"
+                >
+                  {showAllStates ? 'Ver Top 10' : `Ver Todos (${stateData.length})`}
+                </Button>
+              )}
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardHeader>
+          <CardContent>
+            {stateData.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                Nenhum dado disponível para o período selecionado
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {(showAllStates ? stateData : stateData.slice(0, 10)).map((state, index) => (
+                  <div
+                    key={state.state}
+                    className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors ${
+                      selectedState === state.state ? 'bg-blue-50 border-blue-300' : 'hover:bg-gray-50'
+                    }`}
+                    onClick={() => setSelectedState(state.state)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Badge variant="outline" className="w-8 text-center">
+                        {index + 1}
+                      </Badge>
+                      <span className="font-semibold">{state.state}</span>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="text-sm text-gray-600">
+                        <span className="text-green-600">{state.sentCount}</span> /{' '}
+                        <span className="text-purple-600">{state.receivedCount}</span>
+                      </div>
+                      <Badge
+                        variant="secondary"
+                        style={{
+                          backgroundColor: getStateColor(state.messageCount, maxMessages),
+                          color: '#fff'
+                        }}
+                      >
+                        {state.messageCount} mensagens
+                      </Badge>
+                    </div>
+                  </div>
+                ))}
+                {!showAllStates && stateData.length > 10 && (
+                  <div className="text-center pt-2 text-sm text-gray-500">
+                    + {stateData.length - 10} estados restantes
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Informações do Estado Selecionado */}
       {selectedStateData && (
@@ -473,57 +759,6 @@ const HeatmapGeographic: React.FC<HeatmapGeographicProps> = () => {
           </CardContent>
         </Card>
       )}
-
-      {/* Ranking de Estados */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <TrendingUp className="h-5 w-5" />
-            Ranking de Estados
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {stateData.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              Nenhum dado disponível para o período selecionado
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {stateData.map((state, index) => (
-                <div
-                  key={state.state}
-                  className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors ${
-                    selectedState === state.state ? 'bg-blue-50 border-blue-300' : 'hover:bg-gray-50'
-                  }`}
-                  onClick={() => setSelectedState(state.state)}
-                >
-                  <div className="flex items-center gap-3">
-                    <Badge variant="outline" className="w-8 text-center">
-                      {index + 1}
-                    </Badge>
-                    <span className="font-semibold">{state.state}</span>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-sm text-gray-600">
-                      <span className="text-green-600">{state.sentCount}</span> /{' '}
-                      <span className="text-purple-600">{state.receivedCount}</span>
-                    </div>
-                    <Badge
-                      variant="secondary"
-                      style={{
-                        backgroundColor: getStateColor(state.messageCount, maxMessages),
-                        color: '#fff'
-                      }}
-                    >
-                      {state.messageCount} mensagens
-                    </Badge>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 };

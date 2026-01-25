@@ -17,7 +17,8 @@ import {
   Bar,
   AreaChart,
   Area,
-  ComposedChart
+  ComposedChart,
+  Legend
 } from 'recharts';
 import {
   Users,
@@ -695,20 +696,21 @@ const ManagerWhatsAppReport: React.FC = () => {
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center flex-wrap gap-4">
         <div>
-          <h1 className="text-3xl text-gray-900 font-bold">Relatório de Uso do WhatsApp</h1>
-          <p className="text-gray-600 mt-1">Tempo de uso diário por usuário (00:01 - 23:59)</p>
+          <h1 className="text-2xl text-gray-900 font-bold">Relatório de Uso do WhatsApp</h1>
+          <p className="text-sm text-gray-600 mt-1">Tempo de uso diário por usuário (00:01 - 23:59)</p>
         </div>
         
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 flex-wrap">
           <Button
             onClick={() => setShowHelp(true)}
             variant="outline"
             size="sm"
             title="Ajuda - Como funciona este relatório"
+            className="text-xs"
           >
-            <AlertCircle className="h-4 w-4 mr-2" />
+            <AlertCircle className="h-3 w-3 mr-1" />
             Ajuda
           </Button>
           
@@ -717,20 +719,23 @@ const ManagerWhatsAppReport: React.FC = () => {
             disabled={refreshing}
             variant="outline"
             size="sm"
+            className="text-xs"
           >
-            <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-3 w-3 mr-1 ${refreshing ? 'animate-spin' : ''}`} />
             Atualizar
           </Button>
 
           {/* Botões de Exportação */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <Button
               onClick={() => reportData && exportToExcel(convertToExportData(reportData))}
               variant="outline"
               size="sm"
               disabled={!reportData}
+              className="text-xs px-2"
+              title="Exportar para Excel"
             >
-              <Download className="h-4 w-4 mr-2" />
+              <Download className="h-3 w-3 mr-1" />
               Excel
             </Button>
             
@@ -739,8 +744,10 @@ const ManagerWhatsAppReport: React.FC = () => {
               variant="outline"
               size="sm"
               disabled={!reportData}
+              className="text-xs px-2"
+              title="Exportar para CSV"
             >
-              <Download className="h-4 w-4 mr-2" />
+              <Download className="h-3 w-3 mr-1" />
               CSV
             </Button>
             
@@ -749,8 +756,10 @@ const ManagerWhatsAppReport: React.FC = () => {
               variant="outline"
               size="sm"
               disabled={!reportData}
+              className="text-xs px-2"
+              title="Exportar para PDF"
             >
-              <Download className="h-4 w-4 mr-2" />
+              <Download className="h-3 w-3 mr-1" />
               PDF
             </Button>
           </div>
@@ -828,11 +837,11 @@ const ManagerWhatsAppReport: React.FC = () => {
           {/* Tabela de Tempo de Uso do WhatsApp */}
           <Card className="mb-6">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Clock className="h-5 w-5" />
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Clock className="h-4 w-4 text-blue-600" />
                 Resumo de Tempo de Uso do WhatsApp
               </CardTitle>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-xs text-muted-foreground mt-1">
                 Visão rápida do tempo de uso por usuário para análise gerencial
               </p>
             </CardHeader>
@@ -1034,18 +1043,39 @@ const ManagerWhatsAppReport: React.FC = () => {
             </CardContent>
           </Card>
 
-          {/* Gráfico de Curva de Crescimento - Evolução Temporal */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Evolução do Uso do WhatsApp</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={400}>
+          {/* Gráficos lado a lado */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Gráfico de Curva de Crescimento - Evolução Temporal */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4 text-blue-600" />
+                  Evolução do Uso do WhatsApp
+                </CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Tendência de uso ao longo do período
+                </p>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={350}>
                 <ComposedChart data={trends}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis yAxisId="left" />
-                  <YAxis yAxisId="right" orientation="right" />
+                  <XAxis 
+                    dataKey="date" 
+                    tick={{ fontSize: 12 }}
+                    label={{ value: 'Data', position: 'insideBottom', offset: -5, style: { fontSize: 12 } }}
+                  />
+                  <YAxis 
+                    yAxisId="left" 
+                    tick={{ fontSize: 12 }}
+                    label={{ value: 'Tempo (min)', angle: -90, position: 'insideLeft', style: { fontSize: 12 } }}
+                  />
+                  <YAxis 
+                    yAxisId="right" 
+                    orientation="right"
+                    tick={{ fontSize: 12 }}
+                    label={{ value: 'Quantidade', angle: 90, position: 'insideRight', style: { fontSize: 12 } }}
+                  />
                   <Tooltip 
                     formatter={(value, name) => [
                       name === 'totalUsage' || name === 'avgSessionTime' ? formatTime(value as number) : value,
@@ -1053,6 +1083,10 @@ const ManagerWhatsAppReport: React.FC = () => {
                       name === 'activeUsers' ? 'Usuários Ativos' :
                       name === 'messagesSent' ? 'Mensagens Enviadas' : 'Tempo Médio por Sessão'
                     ]}
+                  />
+                  <Legend 
+                    wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}
+                    iconType="line"
                   />
                   <Area
                     yAxisId="left"
@@ -1062,7 +1096,7 @@ const ManagerWhatsAppReport: React.FC = () => {
                     stroke="#3b82f6"
                     fill="#3b82f6"
                     fillOpacity={0.3}
-                    name="totalUsage"
+                    name="Tempo Total"
                   />
                   <Line
                     yAxisId="right"
@@ -1070,7 +1104,7 @@ const ManagerWhatsAppReport: React.FC = () => {
                     dataKey="activeUsers"
                     stroke="#10b981"
                     strokeWidth={2}
-                    name="activeUsers"
+                    name="Usuários Ativos"
                   />
                   <Line
                     yAxisId="right"
@@ -1078,42 +1112,59 @@ const ManagerWhatsAppReport: React.FC = () => {
                     dataKey="messagesSent"
                     stroke="#f59e0b"
                     strokeWidth={2}
-                    name="messagesSent"
+                    name="Mensagens Enviadas"
                   />
                 </ComposedChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
 
-          {/* Gráfico de Barras - Comparação por Usuário */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Comparação de Uso por Usuário</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={400}>
-                <BarChart data={filteredUsers.map(user => ({
-                  name: user.userName.split(' ')[0],
-                  totalUsage: user.totalUsage,
-                  avgDailyUsage: user.avgDailyUsage,
-                  peakUsage: user.peakUsageMinutes
-                }))}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" />
-                  <YAxis />
-                  <Tooltip 
-                    formatter={(value, name) => [
-                      formatTime(value as number),
-                      name === 'totalUsage' ? 'Tempo Total' : 
-                      name === 'avgDailyUsage' ? 'Média Diária' : 'Pico Diário'
-                    ]}
-                  />
-                  <Bar dataKey="totalUsage" fill="#3b82f6" name="totalUsage" />
-                  <Bar dataKey="avgDailyUsage" fill="#10b981" name="avgDailyUsage" />
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
+            {/* Gráfico de Barras - Comparação por Usuário */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Users className="h-4 w-4 text-green-600" />
+                  Comparação por Usuário
+                </CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Tempo total vs média diária por usuário
+                </p>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={350}>
+                  <BarChart data={filteredUsers.map(user => ({
+                    name: user.userName.split(' ')[0],
+                    totalUsage: user.totalUsage,
+                    avgDailyUsage: user.avgDailyUsage,
+                    peakUsage: user.peakUsageMinutes
+                  }))}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis 
+                      dataKey="name" 
+                      tick={{ fontSize: 12 }}
+                      label={{ value: 'Usuário', position: 'insideBottom', offset: -5, style: { fontSize: 12 } }}
+                    />
+                    <YAxis 
+                      tick={{ fontSize: 12 }}
+                      label={{ value: 'Tempo (min)', angle: -90, position: 'insideLeft', style: { fontSize: 12 } }}
+                    />
+                    <Tooltip 
+                      formatter={(value, name) => [
+                        formatTime(value as number),
+                        name === 'totalUsage' ? 'Tempo Total' : 
+                        name === 'avgDailyUsage' ? 'Média Diária' : 'Pico Diário'
+                      ]}
+                    />
+                    <Legend 
+                      wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}
+                    />
+                    <Bar dataKey="totalUsage" fill="#3b82f6" name="Tempo Total" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="avgDailyUsage" fill="#10b981" name="Média Diária" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </div>
 
 
         </>
