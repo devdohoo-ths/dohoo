@@ -102,18 +102,32 @@ router.get('/contatos/numeros-conectados', async (req, res) => {
     let roleName = req.user?.role_name || '';
     let isAgent = false;
     
-    // Se role_name não estiver disponível no req.user, buscar da tabela
+    // ✅ CORREÇÃO: Se role_name não estiver disponível no req.user, buscar em default_roles OU roles
     if (!roleName && req.user?.role_id) {
-      console.log('⚠️ [Campanhas] role_name não encontrado em req.user, buscando da tabela roles...');
-      const { data: role, error: roleError } = await supabase
-        .from('roles')
+      console.log('⚠️ [Campanhas] role_name não encontrado em req.user, buscando da tabela...');
+      // Primeiro tentar buscar em default_roles
+      const { data: defaultRole, error: defaultRoleError } = await supabase
+        .from('default_roles')
         .select('name')
         .eq('id', req.user.role_id)
+        .eq('is_active', true)
         .single();
       
-      if (!roleError && role?.name) {
-        roleName = role.name;
-        console.log('✅ [Campanhas] Role encontrado na tabela:', roleName);
+      if (defaultRole && !defaultRoleError) {
+        roleName = defaultRole.name;
+        console.log('✅ [Campanhas] Role encontrado em default_roles:', roleName);
+      } else {
+        // Se não encontrou em default_roles, buscar em roles
+        const { data: role, error: roleError } = await supabase
+          .from('roles')
+          .select('name')
+          .eq('id', req.user.role_id)
+          .single();
+        
+        if (!roleError && role?.name) {
+          roleName = role.name;
+          console.log('✅ [Campanhas] Role encontrado em roles:', roleName);
+        }
       }
     } else if (!roleName && !req.user?.role_id) {
       console.log('⚠️ [Campanhas] Nem role_name nem role_id encontrados em req.user, buscando do profile...');

@@ -64,6 +64,7 @@ interface Role {
   description?: string;
   permissions: Record<string, any>;
   is_default: boolean;
+  is_system_default?: boolean; // ✅ Novo campo para identificar roles padrão do sistema
   user_count: number;
   created_at: string;
   updated_at: string;
@@ -123,6 +124,11 @@ const PermissionsManager: React.FC = () => {
 
   // 🎯 FUNÇÃO PARA VERIFICAR SE PODE EDITAR UMA ROLE ESPECÍFICA
   const canEditRole = useCallback((role: Role) => {
+    // ✅ Roles padrão do sistema (is_system_default) só podem ser editadas por superAdmin
+    if (role.is_system_default) {
+      return userLevel === 'super_admin';
+    }
+    
     if (userLevel === 'super_admin') {
       return true; // Super Admin pode editar qualquer role (incluindo globais)
     } else if (userLevel === 'admin') {
@@ -134,8 +140,13 @@ const PermissionsManager: React.FC = () => {
 
   // 🎯 FUNÇÃO PARA VERIFICAR SE PODE DELETAR UMA ROLE ESPECÍFICA
   const canDeleteRole = useCallback((role: Role) => {
+    // ✅ Roles padrão do sistema NÃO podem ser deletadas
+    if (role.is_system_default) {
+      return false;
+    }
+    
     if (userLevel === 'super_admin') {
-      return true; // Super Admin pode deletar qualquer role (incluindo globais)
+      return true; // Super Admin pode deletar qualquer role (exceto padrão do sistema)
     } else if (userLevel === 'admin') {
       // Admin só pode deletar roles que não são default E que pertencem à sua organização
       return !role.is_default && role.organization_id === organization?.id;
@@ -276,6 +287,15 @@ const PermissionsManager: React.FC = () => {
 
   const saveRole = async () => {
     try {
+      // ✅ VALIDAÇÃO: Impedir criação de roles com nome "superAdmin" (case-insensitive)
+      const normalizedName = roleForm.name.toLowerCase().trim();
+      const forbiddenNames = ['superadmin', 'super admin', 'super-admin'];
+      
+      if (forbiddenNames.includes(normalizedName)) {
+        setError('Não é permitido criar uma role com o nome "superAdmin". Este nome é reservado para funcionários Dohoo.');
+        return;
+      }
+
       setLoading(true);
       const url = selectedRole 
         ? `${apiBase}/api/permissions/roles/${selectedRole.id}`
@@ -571,11 +591,17 @@ const PermissionsManager: React.FC = () => {
                       <p className="text-xs sm:text-sm text-muted-foreground">{role.description}</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {role.is_default && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {role.is_system_default && (
+                      <Badge variant="default" className="text-xs bg-purple-600 text-white">
+                        <Crown className="w-3 h-3 mr-1" />
+                        Sistema
+                      </Badge>
+                    )}
+                    {role.is_default && !role.is_system_default && (
                       <Badge variant="secondary" className="text-xs">Padrão</Badge>
                     )}
-                    {!role.organization_id && (
+                    {!role.organization_id && !role.is_system_default && (
                       <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-200">
                         Global
                       </Badge>

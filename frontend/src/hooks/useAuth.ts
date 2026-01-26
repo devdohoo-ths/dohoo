@@ -17,6 +17,8 @@ type Profile = Tables<'profiles'> & {
     description?: string;
     permissions?: any;
   };
+  role_name?: string | null; // Nome da role (vem do backend)
+  role_permissions?: Record<string, any>; // Permissões da role (vem do backend)
   organization?: {
     id: string;
     name: string;

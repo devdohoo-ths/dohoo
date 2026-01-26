@@ -111,17 +111,31 @@ router.get('/stats', authenticateToken, async (req, res) => {
         .single();
 
       if (!profileError && userProfile?.role_id) {
-        // Buscar nome da role
-        const { data: role, error: roleError } = await supabase
-          .from('roles')
+        // ✅ CORREÇÃO: Buscar nome da role em default_roles OU roles
+        // Primeiro tentar buscar em default_roles
+        const { data: defaultRole, error: defaultRoleError } = await supabase
+          .from('default_roles')
           .select('name')
           .eq('id', userProfile.role_id)
+          .eq('is_active', true)
           .single();
 
-        if (!roleError && role?.name) {
-          userRoleName = role.name;
-          // Verificar se é agente (case insensitive)
-          isAgent = role.name.toLowerCase().includes('agente') || role.name.toLowerCase().includes('agent');
+        if (defaultRole && !defaultRoleError) {
+          userRoleName = defaultRole.name;
+          isAgent = defaultRole.name.toLowerCase().includes('agente') || defaultRole.name.toLowerCase().includes('agent');
+        } else {
+          // Se não encontrou em default_roles, buscar em roles
+          const { data: role, error: roleError } = await supabase
+            .from('roles')
+            .select('name')
+            .eq('id', userProfile.role_id)
+            .single();
+
+          if (!roleError && role?.name) {
+            userRoleName = role.name;
+            // Verificar se é agente (case insensitive)
+            isAgent = role.name.toLowerCase().includes('agente') || role.name.toLowerCase().includes('agent');
+          }
         }
       }
     } catch (error) {
@@ -948,10 +962,6 @@ router.get('/individual-metrics', authenticateToken, async (req, res) => {
         department, 
         is_online, 
         role_id,
-        roles (
-          id,
-          name
-        ),
         created_at, 
         updated_at
       `)
@@ -963,8 +973,48 @@ router.get('/individual-metrics', authenticateToken, async (req, res) => {
       return res.status(500).json({ error: 'Erro ao buscar agentes' });
     }
 
+    // ✅ CORREÇÃO: Buscar roles manualmente (default_roles OU roles)
+    const agentsWithRoles = await Promise.all(
+      (agentsData || []).map(async (agent) => {
+        let roleName = 'agent';
+        
+        if (agent.role_id) {
+          // Primeiro tentar buscar em default_roles
+          const { data: defaultRole, error: defaultRoleError } = await supabase
+            .from('default_roles')
+            .select('id, name')
+            .eq('id', agent.role_id)
+            .eq('is_active', true)
+            .single();
+
+          if (defaultRole && !defaultRoleError) {
+            roleName = defaultRole.name;
+          } else {
+            // Se não encontrou em default_roles, buscar em roles
+            const { data: role, error: roleError } = await supabase
+              .from('roles')
+              .select('id, name')
+              .eq('id', agent.role_id)
+              .single();
+
+            if (!roleError && role?.name) {
+              roleName = role.name;
+            }
+          }
+        }
+        
+        return {
+          ...agent,
+          roles: {
+            id: agent.role_id,
+            name: roleName
+          }
+        };
+      })
+    );
+
     // 🎯 FILTRAR APENAS USUÁRIOS REAIS
-    const realUsers = agentsData?.filter(agent => {
+    const realUsers = agentsWithRoles?.filter(agent => {
       const isRealUser = !agent.name?.toLowerCase().includes('exemplo') && 
                         !agent.name?.toLowerCase().includes('test') &&
                         !agent.name?.toLowerCase().includes('demo') &&
@@ -1119,14 +1169,28 @@ router.get('/heatmap-data', authenticateToken, async (req, res) => {
         .single();
 
       if (!profileError && userProfile?.role_id) {
-        const { data: role, error: roleError } = await supabase
-          .from('roles')
+        // ✅ CORREÇÃO: Buscar nome da role em default_roles OU roles
+        // Primeiro tentar buscar em default_roles
+        const { data: defaultRole, error: defaultRoleError } = await supabase
+          .from('default_roles')
           .select('name')
           .eq('id', userProfile.role_id)
+          .eq('is_active', true)
           .single();
 
-        if (!roleError && role?.name) {
-          isAgent = role.name.toLowerCase().includes('agente') || role.name.toLowerCase().includes('agent');
+        if (defaultRole && !defaultRoleError) {
+          isAgent = defaultRole.name.toLowerCase().includes('agente') || defaultRole.name.toLowerCase().includes('agent');
+        } else {
+          // Se não encontrou em default_roles, buscar em roles
+          const { data: role, error: roleError } = await supabase
+            .from('roles')
+            .select('name')
+            .eq('id', userProfile.role_id)
+            .single();
+
+          if (!roleError && role?.name) {
+            isAgent = role.name.toLowerCase().includes('agente') || role.name.toLowerCase().includes('agent');
+          }
         }
       }
     } catch (error) {

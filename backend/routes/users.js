@@ -9,7 +9,7 @@ import { supabase, supabaseAdmin } from '../lib/supabaseClient.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { sendEmail } from '../services/emailService.js';
 
-// Helper para buscar role_name do usuário
+// Helper para buscar role_name do usuário (busca em roles OU default_roles)
 async function getUserRoleName(userId) {
   if (!userId) return null;
   
@@ -20,18 +20,31 @@ async function getUserRoleName(userId) {
     .single();
     
   if (profile && profile.role_id) {
+    // ✅ CORREÇÃO: Buscar primeiro em default_roles, depois em roles
+    const { data: defaultRole } = await supabase
+      .from('default_roles')
+      .select('name')
+      .eq('id', profile.role_id)
+      .single();
+    
+    if (defaultRole) {
+      return defaultRole.name || null;
+    }
+    
+    // Se não encontrou em default_roles, buscar em roles
     const { data: role } = await supabase
       .from('roles')
       .select('name')
       .eq('id', profile.role_id)
       .single();
+    
     return role?.name || null;
   }
   
   return null;
 }
 
-// Helper para buscar permissions do usuário
+// Helper para buscar permissions do usuário (busca em roles OU default_roles)
 async function getUserPermissions(userId) {
   if (!userId) return {};
   
@@ -42,11 +55,24 @@ async function getUserPermissions(userId) {
     .single();
     
   if (profile && profile.role_id) {
+    // ✅ CORREÇÃO: Buscar primeiro em default_roles, depois em roles
+    const { data: defaultRole } = await supabase
+      .from('default_roles')
+      .select('permissions')
+      .eq('id', profile.role_id)
+      .single();
+    
+    if (defaultRole) {
+      return defaultRole.permissions || {};
+    }
+    
+    // Se não encontrou em default_roles, buscar em roles
     const { data: role } = await supabase
       .from('roles')
       .select('permissions')
       .eq('id', profile.role_id)
       .single();
+    
     return role?.permissions || {};
   }
   
@@ -341,15 +367,38 @@ router.patch('/:id', async (req, res) => {
     }
     
     // ✅ CORREÇÃO: Verificar se o usuário sendo editado é Super Admin
-    const { data: existingUserRole, error: existingRoleError } = await supabase
+    const { data: existingUserProfile, error: existingProfileError } = await supabase
       .from('profiles')
-      .select('role_id, roles!inner(name)')
+      .select('role_id')
       .eq('id', id)
       .single();
     
-    if (!existingRoleError && existingUserRole?.roles) {
-      const existingRoleName = existingUserRole.roles.name?.toLowerCase();
-      const isExistingUserSuperAdmin = existingRoleName?.includes('super') || existingRoleName?.includes('super_admin');
+    let existingRoleName = null;
+    if (!existingProfileError && existingUserProfile?.role_id) {
+      // Buscar role em default_roles ou roles
+      const { data: defaultRole } = await supabase
+        .from('default_roles')
+        .select('name')
+        .eq('id', existingUserProfile.role_id)
+        .single();
+      
+      if (defaultRole) {
+        existingRoleName = defaultRole.name?.toLowerCase();
+      } else {
+        const { data: role } = await supabase
+          .from('roles')
+          .select('name')
+          .eq('id', existingUserProfile.role_id)
+          .single();
+        
+        if (role) {
+          existingRoleName = role.name?.toLowerCase();
+        }
+      }
+    }
+    
+    if (existingRoleName) {
+      const isExistingUserSuperAdmin = existingRoleName.includes('super') || existingRoleName.includes('super_admin');
       
       // Admins não podem editar Super Admins
       if (currentUserRole === 'admin' && isExistingUserSuperAdmin) {
@@ -361,11 +410,33 @@ router.patch('/:id', async (req, res) => {
     
     // Validar hierarquia se role_id está sendo alterado
     if (role_id !== undefined) {
-      const { data: targetRole, error: targetRoleError } = await supabase
+      // ✅ CORREÇÃO: Buscar role em roles OU default_roles
+      let targetRole = null;
+      let targetRoleError = null;
+      
+      // Primeiro tentar buscar na tabela roles
+      const { data: roleFromRoles, error: errorFromRoles } = await supabase
         .from('roles')
         .select('name')
         .eq('id', role_id)
         .single();
+
+      if (!errorFromRoles && roleFromRoles) {
+        targetRole = roleFromRoles;
+      } else {
+        // Se não encontrou em roles, tentar em default_roles
+        const { data: roleFromDefault, error: errorFromDefault } = await supabase
+          .from('default_roles')
+          .select('name')
+          .eq('id', role_id)
+          .single();
+
+        if (!errorFromDefault && roleFromDefault) {
+          targetRole = roleFromDefault;
+        } else {
+          targetRoleError = errorFromDefault || errorFromRoles;
+        }
+      }
 
       if (!targetRoleError && targetRole) {
         const targetRoleName = targetRole.name?.toLowerCase();
@@ -501,52 +572,96 @@ router.post('/invite', async (req, res) => {
     console.log('🔐 Validando hierarquia - Usuario atual:', currentUserRole, 'ID:', currentUserId);
     // Se não veio role_id mas veio role_name, buscar o id correspondente
     if (!role_id && role_name) {
-      // Buscar role pelo nome (case-insensitive) na organização
+      // Buscar role pelo nome (case-insensitive) - primeiro em default_roles, depois em roles
       console.log('🔍 [DEBUG] Buscando role_name:', role_name, 'na organização:', organization_id);
       
-      // ✅ CORREÇÃO: Usar cliente admin (validações de segurança feitas no middleware)
-      const { data: foundRole, error: roleError } = await supabaseAdmin
-        .from('roles')
-        .select('id, name')
-        .is('organization_id', null)
-        .ilike('name', role_name.trim());
-        
-      console.log('🔍 [DEBUG] Query resultado:', { foundRole, roleError });
+      let foundRole = null;
       
-      if (roleError) {
-        console.error('❌ [DEBUG] Erro na query role:', roleError);
-        return res.status(400).json({ error: 'Erro ao buscar role: ' + roleError.message });
-      }
-      if (!foundRole || foundRole.length === 0) {
-        console.error('❌ [DEBUG] Role não encontrada. Roles disponíveis na org:');
-        
-        // Debug: listar todas as roles da organização
-        const { data: allRoles } = await supabaseAdmin
+      // ✅ CORREÇÃO: Buscar primeiro em default_roles (roles padrão do sistema)
+      const { data: defaultRole, error: defaultRoleError } = await supabaseAdmin
+        .from('default_roles')
+        .select('id, name')
+        .eq('is_active', true)
+        .ilike('name', role_name.trim())
+        .single();
+      
+      if (!defaultRoleError && defaultRole) {
+        foundRole = defaultRole;
+        console.log('✅ [DEBUG] Role encontrada em default_roles:', defaultRole);
+      } else {
+        // Se não encontrou em default_roles, buscar em roles
+        const { data: roleFromRoles, error: roleError } = await supabaseAdmin
           .from('roles')
           .select('id, name')
-          .is('organization_id', null);
+          .or(`organization_id.is.null,organization_id.eq.${organization_id}`)
+          .ilike('name', role_name.trim())
+          .limit(1);
         
-        console.log('📋 [DEBUG] Todas as roles da org:', allRoles);
-        
-        return res.status(400).json({ 
-          error: `Role '${role_name}' não encontrada para esta organização. Verifique o nome exato da role.`,
-          availableRoles: allRoles?.map(r => r.name) || []
-        });
+        if (!roleError && roleFromRoles && roleFromRoles.length > 0) {
+          foundRole = roleFromRoles[0];
+          console.log('✅ [DEBUG] Role encontrada em roles:', roleFromRoles[0]);
+        } else {
+          console.error('❌ [DEBUG] Role não encontrada em nenhuma tabela');
+          
+          // Debug: listar todas as roles disponíveis
+          const { data: allDefaultRoles } = await supabaseAdmin
+            .from('default_roles')
+            .select('id, name')
+            .eq('is_active', true);
+          
+          const { data: allRoles } = await supabaseAdmin
+            .from('roles')
+            .select('id, name')
+            .or(`organization_id.is.null,organization_id.eq.${organization_id}`);
+          
+          const allAvailableRoles = [
+            ...(allDefaultRoles || []).map(r => r.name),
+            ...(allRoles || []).map(r => r.name)
+          ];
+          
+          console.log('📋 [DEBUG] Todas as roles disponíveis:', allAvailableRoles);
+          
+          return res.status(400).json({ 
+            error: `Role '${role_name}' não encontrada. Verifique o nome exato da role.`,
+            availableRoles: allAvailableRoles
+          });
+        }
       }
       
-      role_id = foundRole[0].id;
-      console.log('✅ [DEBUG] Role encontrada:', foundRole[0], 'role_id definido como:', role_id);
+      role_id = foundRole.id;
+      console.log('✅ [DEBUG] Role encontrada:', foundRole, 'role_id definido como:', role_id);
     }
 
 
     // Validar hierarquia de permissões antes de criar o usuário
     if (role_id) {
-      // ✅ CORREÇÃO: Usar cliente admin (validações de segurança feitas no middleware)
-      const { data: targetRole, error: targetRoleError } = await supabaseAdmin
-        .from('roles')
+      // ✅ CORREÇÃO: Buscar role em default_roles OU roles
+      let targetRole = null;
+      let targetRoleError = null;
+      
+      // Primeiro tentar buscar na tabela default_roles
+      const { data: roleFromDefault, error: errorFromDefault } = await supabaseAdmin
+        .from('default_roles')
         .select('name')
         .eq('id', role_id)
         .single();
+
+      if (!errorFromDefault && roleFromDefault) {
+        targetRole = roleFromDefault;
+      } else {
+        // Se não encontrou em default_roles, tentar em roles
+        const { data: roleFromRoles, error: errorFromRoles } = await supabaseAdmin
+          .from('roles')
+          .select('name')
+          .eq('id', role_id)
+          .single();
+
+        if (!errorFromRoles && roleFromRoles) {
+          targetRole = roleFromRoles;
+        } else {
+          targetRoleError = errorFromRoles || errorFromDefault;
+        }
+      }
 
       if (!targetRoleError && targetRole) {
         const targetRoleName = targetRole.name?.toLowerCase();
@@ -746,13 +861,36 @@ router.delete('/:userId', async (req, res) => {
     // ✅ CORREÇÃO: Verificar se o usuário sendo excluído é Super Admin
     const { data: userToDelete, error: userCheckError } = await supabase
       .from('profiles')
-      .select('id, role_id, roles!inner(name)')
+      .select('id, role_id')
       .eq('id', userId)
       .single();
     
-    if (!userCheckError && userToDelete?.roles) {
-      const targetRoleName = userToDelete.roles.name?.toLowerCase();
-      const isTargetSuperAdmin = targetRoleName?.includes('super') || targetRoleName?.includes('super_admin');
+    let targetRoleName = null;
+    if (!userCheckError && userToDelete?.role_id) {
+      // Buscar role em default_roles ou roles
+      const { data: defaultRole } = await supabase
+        .from('default_roles')
+        .select('name')
+        .eq('id', userToDelete.role_id)
+        .single();
+      
+      if (defaultRole) {
+        targetRoleName = defaultRole.name?.toLowerCase();
+      } else {
+        const { data: role } = await supabase
+          .from('roles')
+          .select('name')
+          .eq('id', userToDelete.role_id)
+          .single();
+        
+        if (role) {
+          targetRoleName = role.name?.toLowerCase();
+        }
+      }
+    }
+    
+    if (targetRoleName) {
+      const isTargetSuperAdmin = targetRoleName.includes('super') || targetRoleName.includes('super_admin');
       
       // Admins não podem excluir Super Admins
       if (currentUserRole === 'admin' && isTargetSuperAdmin) {
@@ -1108,8 +1246,7 @@ router.post('/send-welcome-email', async (req, res) => {
       .select(`
         id, 
         organization_id, 
-        role_id,
-        roles!inner(name)
+        role_id
       `)
       .eq('email', email)
       .single();
@@ -1117,6 +1254,30 @@ router.post('/send-welcome-email', async (req, res) => {
     if (userError || !user) {
       console.error('❌ Usuário não encontrado:', userError);
       return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+
+    // ✅ CORREÇÃO: Buscar role manualmente em default_roles OU roles
+    let roleName = null;
+    if (user.role_id) {
+      const { data: defaultRole } = await supabase
+        .from('default_roles')
+        .select('name')
+        .eq('id', user.role_id)
+        .single();
+      
+      if (defaultRole) {
+        roleName = defaultRole.name;
+      } else {
+        const { data: role } = await supabase
+          .from('roles')
+          .select('name')
+          .eq('id', user.role_id)
+          .single();
+        
+        if (role) {
+          roleName = role.name;
+        }
+      }
     }
 
     // 2. Buscar dados completos da organização (nome + domínio)
@@ -1145,7 +1306,7 @@ router.post('/send-welcome-email', async (req, res) => {
         token: whatsappToken,
         email,
         name,
-        user_role: user.roles.name,
+        user_role: roleName || 'user',
         permissions: {},
         expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 dias
       })
@@ -1208,7 +1369,7 @@ router.post('/send-welcome-email', async (req, res) => {
               <p><strong>Domain:</strong> ${organizationDomain || accessLink}</p>
               <p><strong>Email:</strong> ${email}</p>
               <p><strong>Senha:</strong> ${password}</p>
-              <p><strong>Role:</strong> ${user.roles.name}</p>
+              <p><strong>Role:</strong> ${roleName || 'N/A'}</p>
             </div>
             
             <div class="whatsapp-section">
@@ -1298,8 +1459,7 @@ router.post('/:userId/invite', async (req, res) => {
         name,
         email,
         role_id,
-        organization_id,
-        roles!inner(name)
+        organization_id
       `)
       .eq('id', userId)
       .eq('organization_id', user.organization_id) // ✅ CRÍTICO: Garantir que só acessa usuários da mesma organização
@@ -1308,6 +1468,30 @@ router.post('/:userId/invite', async (req, res) => {
     if (userError || !targetUser) {
       console.error('❌ [API] Usuário não encontrado ou não pertence à organização:', userError);
       return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+
+    // ✅ CORREÇÃO: Buscar role manualmente em default_roles OU roles
+    let targetRoleName = null;
+    if (targetUser.role_id) {
+      const { data: defaultRole } = await supabase
+        .from('default_roles')
+        .select('name')
+        .eq('id', targetUser.role_id)
+        .single();
+      
+      if (defaultRole) {
+        targetRoleName = defaultRole.name;
+      } else {
+        const { data: role } = await supabase
+          .from('roles')
+          .select('name')
+          .eq('id', targetUser.role_id)
+          .single();
+        
+        if (role) {
+          targetRoleName = role.name;
+        }
+      }
     }
 
     // ✅ SEGURANÇA: Verificar se o usuário que está enviando o convite tem permissão
@@ -1348,7 +1532,7 @@ router.post('/:userId/invite', async (req, res) => {
         token: whatsappToken,
         email: targetUser.email,
         name: targetUser.name,
-        user_role: targetUser.roles.name,
+        user_role: targetRoleName || 'user',
         permissions: {},
         expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 dias
       })
@@ -1492,8 +1676,7 @@ router.post('/:userId/generate-link', async (req, res) => {
         name,
         email,
         role_id,
-        organization_id,
-        roles!inner(name)
+        organization_id
       `)
       .eq('id', userId)
       .eq('organization_id', user.organization_id)
@@ -1502,6 +1685,30 @@ router.post('/:userId/generate-link', async (req, res) => {
     if (userError || !targetUser) {
       console.error('❌ [API] Usuário não encontrado ou não pertence à organização:', userError);
       return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+
+    // ✅ CORREÇÃO: Buscar role manualmente em default_roles OU roles
+    let targetRoleName = null;
+    if (targetUser.role_id) {
+      const { data: defaultRole } = await supabase
+        .from('default_roles')
+        .select('name')
+        .eq('id', targetUser.role_id)
+        .single();
+      
+      if (defaultRole) {
+        targetRoleName = defaultRole.name;
+      } else {
+        const { data: role } = await supabase
+          .from('roles')
+          .select('name')
+          .eq('id', targetUser.role_id)
+          .single();
+        
+        if (role) {
+          targetRoleName = role.name;
+        }
+      }
     }
 
     // ✅ SEGURANÇA: Verificar se o usuário que está gerando o link tem permissão
@@ -1526,7 +1733,7 @@ router.post('/:userId/generate-link', async (req, res) => {
         token: whatsappToken,
         email: targetUser.email,
         name: targetUser.name,
-        user_role: targetUser.roles.name,
+        user_role: targetRoleName || 'user',
         permissions: {},
         expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 dias
       })

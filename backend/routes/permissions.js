@@ -9,10 +9,35 @@ const router = express.Router();
 // Middleware de autenticação
 router.use(authenticateToken);
 
-// GET /api/permissions/roles - Listar todas as roles (globais + da organização)
+// GET /api/permissions/roles - Listar todas as roles (default_roles + globais + da organização)
 router.get('/roles', async (req, res) => {
   try {
-    // Buscar roles globais (organization_id IS NULL)
+    // ✅ NOVO: Buscar roles padrão do sistema (da tabela default_roles)
+    const { data: defaultRoles, error: defaultRolesError } = await supabase
+      .from('default_roles')
+      .select('*')
+      .eq('is_active', true)
+      .order('name');
+
+    if (defaultRolesError) {
+      console.error('❌ [API] Erro ao buscar roles padrão:', defaultRolesError);
+    }
+
+    // Converter default_roles para o formato esperado pelo frontend
+    const formattedDefaultRoles = (defaultRoles || []).map(role => ({
+      id: role.id,
+      name: role.name,
+      description: role.description,
+      permissions: role.permissions,
+      is_default: true, // ✅ Marcar como padrão
+      is_system_default: true, // ✅ Novo campo para identificar roles padrão do sistema
+      user_count: 0, // Será calculado abaixo
+      created_at: role.created_at,
+      updated_at: role.updated_at,
+      organization_id: null // Roles padrão não pertencem a organização específica
+    }));
+
+    // Buscar roles globais (organization_id IS NULL) da tabela roles
     const { data: globalRoles, error: globalError } = await supabase
       .from('roles')
       .select('*')
@@ -23,6 +48,12 @@ router.get('/roles', async (req, res) => {
       console.error('❌ [API] Erro ao buscar roles globais:', globalError);
       return res.status(500).json({ error: 'Erro ao buscar roles globais' });
     }
+
+    // Marcar roles globais como não sendo padrão do sistema
+    const formattedGlobalRoles = (globalRoles || []).map(role => ({
+      ...role,
+      is_system_default: false
+    }));
 
     // Buscar roles customizadas da organização
     const { data: customRoles, error: customError } = await supabase
@@ -36,8 +67,14 @@ router.get('/roles', async (req, res) => {
       return res.status(500).json({ error: 'Erro ao buscar roles customizadas' });
     }
 
-    // Combinar roles globais e customizadas
-    const allRoles = [...(globalRoles || []), ...(customRoles || [])];
+    // Marcar roles customizadas como não sendo padrão do sistema
+    const formattedCustomRoles = (customRoles || []).map(role => ({
+      ...role,
+      is_system_default: false
+    }));
+
+    // Combinar todas as roles: padrão do sistema + globais + customizadas
+    const allRoles = [...formattedDefaultRoles, ...formattedGlobalRoles, ...formattedCustomRoles];
 
     // Buscar contagem de usuários por role
     if (allRoles && allRoles.length > 0) {
@@ -59,8 +96,9 @@ router.get('/roles', async (req, res) => {
     res.json({ 
       success: true,
       roles: allRoles || [],
-      globalRoles: globalRoles || [],
-      customRoles: customRoles || []
+      defaultRoles: formattedDefaultRoles || [],
+      globalRoles: formattedGlobalRoles || [],
+      customRoles: formattedCustomRoles || []
     });
 
   } catch (error) {
@@ -76,6 +114,17 @@ router.post('/roles', async (req, res) => {
     
     if (!name) {
       return res.status(400).json({ error: 'Nome da role é obrigatório' });
+    }
+
+    // ✅ VALIDAÇÃO: Impedir criação de roles com nome "superAdmin" (case-insensitive)
+    const normalizedName = name.toLowerCase().trim();
+    const forbiddenNames = ['superadmin', 'super admin', 'super-admin'];
+    
+    if (forbiddenNames.includes(normalizedName)) {
+      console.log('❌ [API] Tentativa de criar role com nome proibido:', name);
+      return res.status(400).json({ 
+        error: 'Não é permitido criar uma role com o nome "superAdmin". Este nome é reservado para funcionários Dohoo.' 
+      });
     }
 
     console.log('🔐 [API] Criando nova role customizada:', { name, description }, 'para organização:', req.user.organization_id);
@@ -184,7 +233,7 @@ router.get('/roles/:id', async (req, res) => {
   }
 });
 
-// PATCH /api/permissions/roles/:id - Atualizar role (apenas customizadas)
+// PATCH /api/permissions/roles/:id - Atualizar role (apenas customizadas ou padrão do sistema se superAdmin)
 router.patch('/roles/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -192,7 +241,77 @@ router.patch('/roles/:id', async (req, res) => {
     
     console.log('🔐 [API] Atualizando role:', id, req.body);
     
-    // Verificar se a role existe
+    // ✅ VERIFICAR SE É ROLE PADRÃO DO SISTEMA (da tabela default_roles)
+    const { data: defaultRole, error: defaultRoleError } = await supabase
+      .from('default_roles')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (!defaultRoleError && defaultRole) {
+      // É uma role padrão do sistema
+      // ✅ APENAS SUPERADMIN PODE EDITAR ROLES PADRÃO DO SISTEMA
+      const userRole = req.user?.role || req.user?.user_role || '';
+      const isSuperAdmin = userRole.toLowerCase() === 'superadmin' || 
+                          userRole.toLowerCase() === 'super_admin' ||
+                          (req.user?.permissions?.system_settings === true);
+      
+      if (!isSuperAdmin) {
+        console.log('❌ [API] Tentativa de editar role padrão do sistema sem permissão:', id);
+        return res.status(403).json({ 
+          error: 'Apenas Super Administradores podem editar roles padrão do sistema.' 
+        });
+      }
+
+      // ✅ VALIDAÇÃO: Impedir alteração do nome para "superAdmin"
+      if (name) {
+        const normalizedName = name.toLowerCase().trim();
+        const forbiddenNames = ['superadmin', 'super admin', 'super-admin'];
+        
+        if (forbiddenNames.includes(normalizedName)) {
+          return res.status(400).json({ 
+            error: 'Não é permitido alterar o nome para "superAdmin". Este nome é reservado.' 
+          });
+        }
+      }
+
+      // Atualizar role padrão do sistema
+      const updateData = {};
+      if (name !== undefined) updateData.name = name;
+      if (description !== undefined) updateData.description = description;
+      if (permissions !== undefined) updateData.permissions = permissions;
+      if (is_default !== undefined) updateData.is_active = is_default; // is_active em default_roles
+      updateData.updated_at = new Date().toISOString();
+
+      const { data: updatedRole, error: updateError } = await supabase
+        .from('default_roles')
+        .update(updateData)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (updateError) {
+        console.error('❌ [API] Erro ao atualizar role padrão:', updateError);
+        return res.status(500).json({ error: 'Erro ao atualizar role padrão' });
+      }
+
+      console.log('✅ [API] Role padrão atualizada com sucesso:', updatedRole.id);
+      
+      // Formatar resposta no formato esperado pelo frontend
+      const formattedRole = {
+        ...updatedRole,
+        is_default: updatedRole.is_active,
+        is_system_default: true,
+        organization_id: null
+      };
+
+      return res.json({ 
+        success: true,
+        role: formattedRole 
+      });
+    }
+    
+    // Se não é role padrão, verificar se é role customizada
     const { data: existingRole, error: checkError } = await supabase
       .from('roles')
       .select('organization_id')
@@ -313,14 +432,29 @@ router.patch('/roles/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/permissions/roles/:id - Deletar role
+// DELETE /api/permissions/roles/:id - Deletar role (não pode deletar roles padrão do sistema)
 router.delete('/roles/:id', async (req, res) => {
   try {
     const { id } = req.params;
     
     console.log('🔐 [API] Deletando role:', id);
     
-    // Verificar se a role existe
+    // ✅ VERIFICAR SE É ROLE PADRÃO DO SISTEMA (da tabela default_roles)
+    const { data: defaultRole, error: defaultRoleError } = await supabase
+      .from('default_roles')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (!defaultRoleError && defaultRole) {
+      // É uma role padrão do sistema - NÃO PODE SER DELETADA
+      console.log('❌ [API] Tentativa de deletar role padrão do sistema:', id);
+      return res.status(403).json({ 
+        error: 'Roles padrão do sistema não podem ser deletadas.' 
+      });
+    }
+    
+    // Verificar se a role existe na tabela roles
     const { data: existingRole, error: checkError } = await supabase
       .from('roles')
       .select('organization_id, is_default')
@@ -336,13 +470,31 @@ router.delete('/roles/:id', async (req, res) => {
     let isSuperAdmin = false;
     if (req.user.role_id) {
       try {
-        const { data: role } = await supabase
-          .from('roles')
+        // ✅ CORREÇÃO: Buscar role em default_roles OU roles
+        let roleData = null;
+        
+        const { data: defaultRoleCheck } = await supabase
+          .from('default_roles')
           .select('name')
           .eq('id', req.user.role_id)
+          .eq('is_active', true)
           .single();
         
-        if (role && role.name === 'Super Admin') {
+        if (defaultRoleCheck) {
+          roleData = defaultRoleCheck;
+        } else {
+          const { data: role } = await supabase
+            .from('roles')
+            .select('name')
+            .eq('id', req.user.role_id)
+            .single();
+          
+          if (role) {
+            roleData = role;
+          }
+        }
+        
+        if (roleData && roleData.name === 'Super Admin') {
           isSuperAdmin = true;
           console.log('✅ [API] Super admin detectado - pode deletar roles globais');
         }
@@ -378,6 +530,65 @@ router.delete('/roles/:id', async (req, res) => {
       console.log('✅ [API] Deletando role customizada da organização');
     }
 
+    // ✅ NOVO: Verificar se há usuários usando essa role ANTES de deletar
+    // 1. Verificar na tabela profiles (usuários ativos usando a role)
+    const { data: profilesUsingRole, error: profilesError } = await supabase
+      .from('profiles')
+      .select('id, name, email')
+      .eq('role_id', id)
+      .limit(10); // Limitar para não sobrecarregar
+
+    if (profilesError) {
+      console.error('❌ [API] Erro ao verificar profiles usando role:', profilesError);
+      return res.status(500).json({ error: 'Erro ao verificar usuários usando esta role' });
+    }
+
+    // 2. Verificar na tabela user_roles (referências históricas)
+    const { data: userRolesUsingRole, error: userRolesError } = await supabase
+      .from('user_roles')
+      .select('id, user_id, role_id')
+      .eq('role_id', id)
+      .limit(10);
+
+    if (userRolesError) {
+      console.warn('⚠️ [API] Aviso ao verificar user_roles (pode não existir):', userRolesError.message);
+      // Não bloquear se a tabela não existir
+    }
+
+    // ✅ CORREÇÃO: Se há usuários em profiles usando a role, impedir deleção
+    if (profilesUsingRole && profilesUsingRole.length > 0) {
+      const usersCount = profilesUsingRole.length;
+      
+      console.log(`❌ [API] Não é possível deletar role: ${usersCount} usuários estão usando esta role`);
+      
+      return res.status(400).json({ 
+        error: 'Não é possível deletar esta role pois existem usuários usando ela.',
+        details: {
+          users_using_role: usersCount,
+          users: profilesUsingRole.map(u => ({ id: u.id, name: u.name, email: u.email })),
+          suggestion: 'Primeiro, atribua outra role aos usuários que estão usando esta role, depois tente deletar novamente.'
+        }
+      });
+    }
+
+    // ✅ Se não há usuários em profiles, remover referências órfãs de user_roles
+    // (referências históricas que não têm mais usuários associados)
+    if (userRolesUsingRole && userRolesUsingRole.length > 0) {
+      console.log(`🧹 [API] Removendo ${userRolesUsingRole.length} referência(s) órfã(s) de user_roles`);
+      
+      const { error: deleteUserRolesError } = await supabase
+        .from('user_roles')
+        .delete()
+        .eq('role_id', id);
+
+      if (deleteUserRolesError) {
+        console.warn('⚠️ [API] Aviso ao limpar user_roles:', deleteUserRolesError.message);
+        // Continuar mesmo se houver erro ao limpar user_roles
+      } else {
+        console.log('✅ [API] Referências órfãs removidas com sucesso');
+      }
+    }
+
     // Deletar a role
     let deleteQuery = supabase
       .from('roles')
@@ -393,6 +604,16 @@ router.delete('/roles/:id', async (req, res) => {
 
     if (error) {
       console.error('❌ [API] Erro ao deletar role:', error);
+      
+      // ✅ CORREÇÃO: Mensagem de erro mais específica
+      if (error.code === '23503') {
+        return res.status(400).json({ 
+          error: 'Não é possível deletar esta role pois ainda existem referências a ela no sistema.',
+          details: 'Existem usuários ou outras entidades usando esta role. Remova todas as referências antes de deletar.',
+          hint: 'Verifique se há usuários com esta role atribuída ou registros na tabela user_roles.'
+        });
+      }
+      
       return res.status(500).json({ error: 'Erro ao deletar role' });
     }
 
@@ -426,15 +647,16 @@ router.get('/modules', async (req, res) => {
   }
 });
 
-// GET /api/permissions/default-roles - Obter roles padrão do sistema (globais)
+// GET /api/permissions/default-roles - Obter roles padrão do sistema (da tabela default_roles)
 router.get('/default-roles', async (req, res) => {
   try {
-    console.log('🔐 [API] Buscando roles padrão do sistema (globais)');
+    console.log('🔐 [API] Buscando roles padrão do sistema (da tabela default_roles)');
     
+    // ✅ Buscar da tabela default_roles (roles padrão do sistema)
     const { data: defaultRoles, error } = await supabase
-      .from('roles')
+      .from('default_roles')
       .select('*')
-      .is('organization_id', null) // Apenas roles globais
+      .eq('is_active', true)
       .order('name', { ascending: true });
 
     if (error) {
@@ -442,11 +664,26 @@ router.get('/default-roles', async (req, res) => {
       return res.status(500).json({ error: 'Erro ao buscar roles padrão' });
     }
 
-    console.log(`✅ [API] ${defaultRoles?.length || 0} roles padrão encontradas`);
+    // Formatar para o formato esperado pelo frontend
+    const formattedRoles = (defaultRoles || []).map(role => ({
+      id: role.id,
+      name: role.name,
+      description: role.description,
+      permissions: role.permissions,
+      is_default: true,
+      is_system_default: true,
+      is_active: role.is_active,
+      created_at: role.created_at,
+      updated_at: role.updated_at,
+      organization_id: null
+    }));
+
+    console.log(`✅ [API] ${formattedRoles?.length || 0} roles padrão encontradas`);
     
     res.json({ 
       success: true,
-      defaultRoles: defaultRoles || []
+      defaultRoles: formattedRoles || [],
+      roles: formattedRoles || [] // Compatibilidade com código antigo
     });
 
   } catch (error) {
@@ -475,15 +712,30 @@ router.get('/user-permissions', async (req, res) => {
     
     if (req.user.role_id) {
       try {
-        const { data: role } = await supabase
-          .from('roles')
+        // ✅ CORREÇÃO: Buscar role em default_roles OU roles
+        // Primeiro tentar buscar em default_roles
+        const { data: defaultRole, error: defaultRoleError } = await supabase
+          .from('default_roles')
           .select('name')
           .eq('id', req.user.role_id)
+          .eq('is_active', true)
           .single();
         
-        if (role && role.name === 'Super Admin') {
+        if (defaultRole && !defaultRoleError && defaultRole.name === 'Super Admin') {
           isSuperAdmin = true;
-          console.log('✅ [API] Super admin detectado via role_id:', req.user.role_id);
+          console.log('✅ [API] Super admin detectado via role_id (default_roles):', req.user.role_id);
+        } else {
+          // Se não encontrou em default_roles, buscar em roles
+          const { data: role, error: roleError } = await supabase
+            .from('roles')
+            .select('name')
+            .eq('id', req.user.role_id)
+            .single();
+          
+          if (role && !roleError && role.name === 'Super Admin') {
+            isSuperAdmin = true;
+            console.log('✅ [API] Super admin detectado via role_id (roles):', req.user.role_id);
+          }
         }
       } catch (error) {
         console.log('🔐 [API] Erro ao verificar role para Super Admin:', error.message);

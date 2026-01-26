@@ -34,7 +34,7 @@ export const authenticateToken = async (req, res, next) => {
                 return res.status(400).json({ error: 'Header x-user-id é obrigatório em desenvolvimento' });
             }
             
-            // ✅ CORREÇÃO: Buscar perfil com estrutura correta
+            // ✅ CORREÇÃO: Buscar perfil (sem join automático de roles)
             const { data: profile, error: profileError } = await supabase
                 .from('profiles')
                 .select(`
@@ -47,12 +47,6 @@ export const authenticateToken = async (req, res, next) => {
                         id,
                         name,
                         status
-                    ),
-                    roles!inner(
-                        id,
-                        name,
-                        description,
-                        permissions
                     )
                 `)
                 .eq('id', userId)
@@ -63,21 +57,48 @@ export const authenticateToken = async (req, res, next) => {
                 return res.status(404).json({ error: 'Perfil do usuário não encontrado' });
             }
 
+            // ✅ CORREÇÃO: Buscar role manualmente em default_roles OU roles
+            let roleData = null;
+            if (profile.role_id) {
+                // Primeiro tentar buscar em default_roles
+                const { data: defaultRole } = await supabase
+                    .from('default_roles')
+                    .select('id, name, description, permissions')
+                    .eq('id', profile.role_id)
+                    .eq('is_active', true)
+                    .single();
+
+                if (defaultRole) {
+                    roleData = defaultRole;
+                } else {
+                    // Se não encontrou em default_roles, buscar em roles
+                    const { data: role } = await supabase
+                        .from('roles')
+                        .select('id, name, description, permissions')
+                        .eq('id', profile.role_id)
+                        .single();
+
+                    if (role) {
+                        roleData = role;
+                    }
+                }
+            }
+
             // ✅ Validar se a organização está ativa (se tiver status)
             if (profile.organizations.status && profile.organizations.status !== 'active') {
                 console.error('❌ [Auth] Organização inativa:', profile.organizations.name);
                 return res.status(403).json({ error: 'Organização inativa' });
             }
 
-            // ✅ CORREÇÃO: Adicionar dados do usuário com estrutura correta
+            // ✅ CORREÇÃO: Adicionar dados do usuário com estrutura correta (com role buscada manualmente)
             req.user = {
                 id: profile.id,
                 email: profile.email,
                 name: profile.name,
                 organization_id: profile.organization_id,
                 role_id: profile.role_id,
-                role_name: profile.roles.name, // ✅ CORRETO: roles.name
-                role_permissions: profile.roles.permissions,
+                role_name: roleData?.name || null,
+                role_permissions: roleData?.permissions || {},
                 organization: {
                     id: profile.organizations.id,
                     name: profile.organizations.name,
@@ -102,7 +123,7 @@ export const authenticateToken = async (req, res, next) => {
             return res.status(403).json({ error: 'Token inválido ou expirado' });
         }
 
-        // ✅ CORREÇÃO: Buscar perfil usando ANON_KEY (SERVICE_ROLE_KEY está truncada)
+        // ✅ CORREÇÃO: Buscar perfil usando ANON_KEY (sem join automático de roles)
         const { data: profile, error: profileError } = await authClient
             .from('profiles')
             .select(`
@@ -115,12 +136,6 @@ export const authenticateToken = async (req, res, next) => {
                     id,
                     name,
                     status
-                ),
-                roles!inner(
-                    id,
-                    name,
-                    description,
-                    permissions
                 )
             `)
             .eq('id', user.id)
@@ -131,21 +146,48 @@ export const authenticateToken = async (req, res, next) => {
             return res.status(404).json({ error: 'Perfil do usuário não encontrado' });
         }
 
+        // ✅ CORREÇÃO: Buscar role manualmente em default_roles OU roles
+        let roleData = null;
+        if (profile.role_id) {
+            // Primeiro tentar buscar em default_roles
+            const { data: defaultRole } = await supabase
+                .from('default_roles')
+                .select('id, name, description, permissions')
+                .eq('id', profile.role_id)
+                .eq('is_active', true)
+                .single();
+
+            if (defaultRole) {
+                roleData = defaultRole;
+            } else {
+                // Se não encontrou em default_roles, buscar em roles
+                const { data: role } = await supabase
+                    .from('roles')
+                    .select('id, name, description, permissions')
+                    .eq('id', profile.role_id)
+                    .single();
+
+                if (role) {
+                    roleData = role;
+                }
+            }
+        }
+
         // ✅ Validar organização ativa
         if (profile.organizations.status && profile.organizations.status !== 'active') {
             console.error('❌ [Auth] Organização inativa:', profile.organizations.name);
             return res.status(403).json({ error: 'Organização inativa' });
         }
 
-        // ✅ CORREÇÃO: Estrutura correta para JWT
+        // ✅ CORREÇÃO: Estrutura correta para JWT (com role buscada manualmente)
         req.user = {
             id: profile.id,
             email: profile.email,
             name: profile.name,
             organization_id: profile.organization_id,
             role_id: profile.role_id,
-            role_name: profile.roles.name,
-            role_permissions: profile.roles.permissions,
+            role_name: roleData?.name || null,
+            role_permissions: roleData?.permissions || {},
             organization: {
                 id: profile.organizations.id,
                 name: profile.organizations.name,

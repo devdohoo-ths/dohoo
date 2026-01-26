@@ -356,15 +356,40 @@ router.get('/assistants', authenticateToken, async (req, res) => {
     
     if (userRoleId) {
       try {
-        const { data: roleData, error: roleError } = await supabase
-          .from('roles')
+        // ✅ CORREÇÃO: Buscar role em default_roles OU roles
+        let roleData = null;
+        
+        // Primeiro tentar buscar em default_roles
+        const { data: defaultRole, error: defaultRoleError } = await supabase
+          .from('default_roles')
           .select('name, permissions')
           .eq('id', userRoleId)
+          .eq('is_active', true)
           .single();
         
-        if (roleError) {
-          console.error('❌ Erro ao buscar role do usuário:', roleError);
-          return res.status(500).json({ error: 'Erro ao validar permissões do usuário' });
+        if (defaultRole && !defaultRoleError) {
+          roleData = defaultRole;
+        } else {
+          // Se não encontrou em default_roles, buscar em roles
+          const { data: role, error: roleError } = await supabase
+            .from('roles')
+            .select('name, permissions')
+            .eq('id', userRoleId)
+            .single();
+          
+          if (roleError) {
+            console.error('❌ Erro ao buscar role do usuário:', roleError);
+            return res.status(500).json({ error: 'Erro ao validar permissões do usuário' });
+          }
+          
+          if (role) {
+            roleData = role;
+          }
+        }
+        
+        if (!roleData) {
+          console.error('❌ Role não encontrada para role_id:', userRoleId);
+          return res.status(500).json({ error: 'Role do usuário não encontrada' });
         }
         
         userRoleName = roleData?.name;
@@ -664,15 +689,40 @@ router.post('/assistants', authenticateToken, async (req, res) => {
     
     if (userRoleId) {
       try {
-        const { data: roleData, error: roleError } = await supabase
-          .from('roles')
+        // ✅ CORREÇÃO: Buscar role em default_roles OU roles
+        let roleData = null;
+        
+        // Primeiro tentar buscar em default_roles
+        const { data: defaultRole, error: defaultRoleError } = await supabase
+          .from('default_roles')
           .select('name, permissions')
           .eq('id', userRoleId)
+          .eq('is_active', true)
           .single();
         
-        if (roleError) {
-          console.error('❌ Erro ao buscar role do usuário:', roleError);
-          return res.status(500).json({ error: 'Erro ao validar permissões do usuário' });
+        if (defaultRole && !defaultRoleError) {
+          roleData = defaultRole;
+        } else {
+          // Se não encontrou em default_roles, buscar em roles
+          const { data: role, error: roleError } = await supabase
+            .from('roles')
+            .select('name, permissions')
+            .eq('id', userRoleId)
+            .single();
+          
+          if (roleError) {
+            console.error('❌ Erro ao buscar role do usuário:', roleError);
+            return res.status(500).json({ error: 'Erro ao validar permissões do usuário' });
+          }
+          
+          if (role) {
+            roleData = role;
+          }
+        }
+        
+        if (!roleData) {
+          console.error('❌ Role não encontrada para role_id:', userRoleId);
+          return res.status(500).json({ error: 'Role do usuário não encontrada' });
         }
         
         userRoleName = roleData?.name;

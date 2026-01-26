@@ -5,7 +5,11 @@ import { Header } from '@/components/layout/Header';
 const ChatDashboard = lazy(() => import('@/components/chat/ChatDashboard'));
 const Dashboard = lazy(() => import('@/components/Dashboard').then(m => ({ default: m.Dashboard })));
 const AccountsPage = lazy(() => import('@/components/accounts/AccountsPage'));
-const AIAssistants = lazy(() => import('@/components/ai/AIAssistants'));
+const AIAssistants = lazy(() => 
+  import('@/components/ai/AIAssistants').then(module => ({
+    default: module.default || module.AIAssistants || (() => <div>Erro ao carregar</div>)
+  }))
+);
 const AIPlayground = lazy(() => import('@/components/ai/AIPlayground').then(m => ({ default: m.AIPlayground })));
 const AnalyticsDashboard = lazy(() => import('@/components/analytics/AnalyticsDashboard').then(m => ({ default: m.AnalyticsDashboard })));
 const SettingsPage = lazy(() => import('@/components/settings/SettingsPage'));

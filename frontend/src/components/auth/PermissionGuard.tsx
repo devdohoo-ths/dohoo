@@ -33,10 +33,10 @@ export const PermissionGuard: React.FC<PermissionGuardProps> = ({
       return { hasAccess: false, reason: 'auth_loading' };
     }
     
-    // Super admin sempre tem acesso imediatamente
-    if (profile.user_role === 'super_admin') {
-      return { hasAccess: true, reason: 'super_admin' };
-    }
+    // ✅ CORREÇÃO: Verificar permissões do banco em vez de hardcode
+    // Se o profile tem role_permissions e todas as permissões estão como true,
+    // ou se tem uma permissão especial que indica acesso total, permitir acesso
+    // Mas isso deve ser verificado através das permissões reais, não hardcode
 
     // Se não há permissões requeridas, mostra o conteúdo
     if (requiredPermissions.length === 0 && anyPermission.length === 0 && allPermissions.length === 0) {

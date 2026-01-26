@@ -38,7 +38,7 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    // Buscar perfil do usuário
+    // ✅ CORREÇÃO: Buscar perfil do usuário (sem join automático de roles)
     const { data: profile, error: profileError } = await authClient
       .from('profiles')
       .select(`
@@ -51,12 +51,6 @@ router.post('/login', async (req, res) => {
           id,
           name,
           status
-        ),
-        roles!inner(
-          id,
-          name,
-          description,
-          permissions
         )
       `)
       .eq('id', data.user.id)
@@ -64,6 +58,33 @@ router.post('/login', async (req, res) => {
 
     if (profileError || !profile) {
       return res.status(404).json({ error: 'Perfil do usuário não encontrado' });
+    }
+
+    // ✅ CORREÇÃO: Buscar role manualmente em default_roles OU roles
+    let roleData = null;
+    if (profile.role_id) {
+      // Primeiro tentar buscar em default_roles
+      const { data: defaultRole } = await supabaseAdmin
+        .from('default_roles')
+        .select('id, name, description, permissions')
+        .eq('id', profile.role_id)
+        .eq('is_active', true)
+        .single();
+
+      if (defaultRole) {
+        roleData = defaultRole;
+      } else {
+        // Se não encontrou em default_roles, buscar em roles
+        const { data: role } = await supabaseAdmin
+          .from('roles')
+          .select('id, name, description, permissions')
+          .eq('id', profile.role_id)
+          .single();
+
+        if (role) {
+          roleData = role;
+        }
+      }
     }
 
     // Retornar dados do usuário e token
@@ -85,8 +106,8 @@ router.post('/login', async (req, res) => {
         email: profile.email,
         organization_id: profile.organization_id,
         role_id: profile.role_id,
-        role_name: profile.roles.name,
-        role_permissions: profile.roles.permissions,
+        role_name: roleData?.name || null,
+        role_permissions: roleData?.permissions || {},
         organization: {
           id: profile.organizations.id,
           name: profile.organizations.name,
@@ -139,7 +160,7 @@ router.get('/session', async (req, res) => {
       return res.status(401).json({ error: 'Token inválido ou expirado' });
     }
 
-    // Buscar perfil
+    // ✅ CORREÇÃO: Buscar perfil (sem join automático de roles)
     const { data: profile, error: profileError } = await authClient
       .from('profiles')
       .select(`
@@ -152,12 +173,6 @@ router.get('/session', async (req, res) => {
           id,
           name,
           status
-        ),
-        roles!inner(
-          id,
-          name,
-          description,
-          permissions
         )
       `)
       .eq('id', user.id)
@@ -165,6 +180,33 @@ router.get('/session', async (req, res) => {
 
     if (profileError || !profile) {
       return res.status(404).json({ error: 'Perfil não encontrado' });
+    }
+
+    // ✅ CORREÇÃO: Buscar role manualmente em default_roles OU roles
+    let roleData = null;
+    if (profile.role_id) {
+      // Primeiro tentar buscar em default_roles
+      const { data: defaultRole } = await supabaseAdmin
+        .from('default_roles')
+        .select('id, name, description, permissions')
+        .eq('id', profile.role_id)
+        .eq('is_active', true)
+        .single();
+
+      if (defaultRole) {
+        roleData = defaultRole;
+      } else {
+        // Se não encontrou em default_roles, buscar em roles
+        const { data: role } = await supabaseAdmin
+          .from('roles')
+          .select('id, name, description, permissions')
+          .eq('id', profile.role_id)
+          .single();
+
+        if (role) {
+          roleData = role;
+        }
+      }
     }
 
     res.json({
@@ -180,15 +222,15 @@ router.get('/session', async (req, res) => {
         email: profile.email,
         organization_id: profile.organization_id,
         role_id: profile.role_id,
-        role_name: profile.roles.name,
-        role_permissions: profile.roles.permissions,
+        role_name: roleData?.name || null,
+        role_permissions: roleData?.permissions || {},
         // ✅ ADICIONADO: Retornar objeto roles completo para compatibilidade com frontend
-        roles: {
-          id: profile.roles.id,
-          name: profile.roles.name,
-          description: profile.roles.description,
-          permissions: profile.roles.permissions
-        },
+        roles: roleData ? {
+          id: roleData.id,
+          name: roleData.name,
+          description: roleData.description,
+          permissions: roleData.permissions
+        } : null,
         organization: {
           id: profile.organizations.id,
           name: profile.organizations.name,
@@ -259,7 +301,7 @@ router.get('/profile', async (req, res) => {
       return res.status(401).json({ error: 'Token inválido ou expirado' });
     }
 
-    // Buscar perfil completo
+    // ✅ CORREÇÃO: Buscar perfil completo (sem join automático de roles)
     const { data: profile, error: profileError } = await authClient
       .from('profiles')
       .select(`
@@ -273,12 +315,6 @@ router.get('/profile', async (req, res) => {
           id,
           name,
           status
-        ),
-        roles!inner(
-          id,
-          name,
-          description,
-          permissions
         )
       `)
       .eq('id', user.id)
@@ -286,6 +322,33 @@ router.get('/profile', async (req, res) => {
 
     if (profileError || !profile) {
       return res.status(404).json({ error: 'Perfil não encontrado' });
+    }
+
+    // ✅ CORREÇÃO: Buscar role manualmente em default_roles OU roles
+    let roleData = null;
+    if (profile.role_id) {
+      // Primeiro tentar buscar em default_roles
+      const { data: defaultRole } = await supabaseAdmin
+        .from('default_roles')
+        .select('id, name, description, permissions')
+        .eq('id', profile.role_id)
+        .eq('is_active', true)
+        .single();
+
+      if (defaultRole) {
+        roleData = defaultRole;
+      } else {
+        // Se não encontrou em default_roles, buscar em roles
+        const { data: role } = await supabaseAdmin
+          .from('roles')
+          .select('id, name, description, permissions')
+          .eq('id', profile.role_id)
+          .single();
+
+        if (role) {
+          roleData = role;
+        }
+      }
     }
 
     res.json({
@@ -297,15 +360,15 @@ router.get('/profile', async (req, res) => {
         organization_id: profile.organization_id,
         role_id: profile.role_id,
         avatar_url: profile.avatar_url,
-        role_name: profile.roles.name,
-        role_permissions: profile.roles.permissions,
+        role_name: roleData?.name || null,
+        role_permissions: roleData?.permissions || {},
         // ✅ ADICIONADO: Retornar objeto roles completo para compatibilidade com frontend
-        roles: {
-          id: profile.roles.id,
-          name: profile.roles.name,
-          description: profile.roles.description,
-          permissions: profile.roles.permissions
-        },
+        roles: roleData ? {
+          id: roleData.id,
+          name: roleData.name,
+          description: roleData.description,
+          permissions: roleData.permissions
+        } : null,
         organization: {
           id: profile.organizations.id,
           name: profile.organizations.name,

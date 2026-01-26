@@ -34,8 +34,22 @@ const getUserRoleName = async (userId) => {
       return 'agent'; // Role padrão
     }
 
-    // Se tem role_id, buscar o nome da role na tabela roles
+    // ✅ CORREÇÃO: Se tem role_id, buscar o nome da role em default_roles OU roles
     if (profile.role_id) {
+      // Primeiro tentar buscar em default_roles
+      const { data: defaultRole, error: defaultRoleError } = await supabase
+        .from('default_roles')
+        .select('name')
+        .eq('id', profile.role_id)
+        .eq('is_active', true)
+        .single();
+
+      if (defaultRole && !defaultRoleError) {
+        console.log('✅ [API] getUserRoleName - Role encontrada em default_roles:', defaultRole.name);
+        return defaultRole.name;
+      }
+
+      // Se não encontrou em default_roles, buscar em roles
       const { data: role, error: roleError } = await supabase
         .from('roles')
         .select('name')
@@ -48,7 +62,7 @@ const getUserRoleName = async (userId) => {
       }
 
       if (role) {
-        console.log('✅ [API] getUserRoleName - Role encontrada:', role.name);
+        console.log('✅ [API] getUserRoleName - Role encontrada em roles:', role.name);
         return role.name;
       }
     }
@@ -85,12 +99,37 @@ router.get('/', async (req, res) => {
       return res.status(403).json({ error: 'Usuário não possui permissões definidas.' });
     }
 
-    // Buscar role e suas permissões
-    const { data: role } = await supabase
-      .from('roles')
+    // ✅ CORREÇÃO: Buscar role e suas permissões em default_roles OU roles
+    let role = null;
+    
+    // Primeiro tentar buscar em default_roles
+    const { data: defaultRole, error: defaultRoleError } = await supabase
+      .from('default_roles')
       .select('name, permissions')
       .eq('id', profile.role_id)
+      .eq('is_active', true)
       .single();
+
+    if (defaultRole && !defaultRoleError) {
+      role = defaultRole;
+      console.log('✅ [API] Role encontrada em default_roles:', defaultRole.name);
+    } else {
+      // Se não encontrou em default_roles, buscar em roles
+      const { data: customRole, error: roleError } = await supabase
+        .from('roles')
+        .select('name, permissions')
+        .eq('id', profile.role_id)
+        .single();
+
+      if (roleError) {
+        console.error('❌ [API] Erro ao buscar role:', roleError);
+      }
+
+      if (customRole && !roleError) {
+        role = customRole;
+        console.log('✅ [API] Role encontrada em roles:', customRole.name);
+      }
+    }
 
     if (!role) {
       console.log('❌ [API] Role não encontrada');
@@ -98,7 +137,22 @@ router.get('/', async (req, res) => {
     }
 
     // Verificar se tem permissão manage_organizations
-    const hasPermission = role.permissions?.advanced_settings?.manage_organizations === true;
+    // Para default_roles, verificar estrutura simples: { "organizations": true } ou { "manage_all_organizations": true }
+    // Para roles customizadas, verificar estrutura aninhada: { "advanced_settings": { "manage_organizations": true } }
+    let hasPermission = false;
+    
+    if (role.permissions) {
+      // Verificar estrutura simples (default_roles)
+      if (role.permissions.organizations === true || 
+          role.permissions.manage_all_organizations === true ||
+          role.permissions.manage_organizations === true) {
+        hasPermission = true;
+      }
+      // Verificar estrutura aninhada (roles customizadas)
+      else if (role.permissions.advanced_settings?.manage_organizations === true) {
+        hasPermission = true;
+      }
+    }
     
     if (!hasPermission) {
       console.log('❌ [API] Usuário não tem permissão manage_organizations');

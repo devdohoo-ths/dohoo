@@ -67,7 +67,8 @@ CREATE TABLE public.profiles (
   role_id uuid,
   CONSTRAINT profiles_pkey PRIMARY KEY (id),
   CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id),
-  CONSTRAINT profiles_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(id),
+  -- ✅ CORREÇÃO: Removida constraint profiles_role_id_fkey - agora role_id pode referenciar roles OU default_roles
+  -- A validação é feita via trigger validate_role_id_trigger
   CONSTRAINT profiles_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id)
 );
 
@@ -1482,3 +1483,40 @@ ALTER TABLE public.whatsapp_reconnect_tokens
 ALTER TABLE public.whatsapp_status_audit
   ADD CONSTRAINT fk_account
   FOREIGN KEY (account_id) REFERENCES public.whatsapp_accounts(account_id);
+
+-- ============================================
+-- FUNÇÕES E TRIGGERS PARA VALIDAÇÃO DE ROLE_ID
+-- ============================================
+
+-- Função para validar se role_id existe em roles OU default_roles
+CREATE OR REPLACE FUNCTION public.validate_role_id()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Se role_id é NULL, permitir (não obrigatório)
+  IF NEW.role_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+  
+  -- Verificar se existe na tabela roles
+  IF EXISTS (SELECT 1 FROM public.roles WHERE id = NEW.role_id) THEN
+    RETURN NEW;
+  END IF;
+  
+  -- Verificar se existe na tabela default_roles
+  IF EXISTS (SELECT 1 FROM public.default_roles WHERE id = NEW.role_id) THEN
+    RETURN NEW;
+  END IF;
+  
+  -- Se não encontrou em nenhuma das duas tabelas, lançar erro
+  RAISE EXCEPTION 'Role ID % não existe em roles ou default_roles', NEW.role_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger para validar role_id antes de INSERT ou UPDATE
+CREATE TRIGGER validate_role_id_trigger
+  BEFORE INSERT OR UPDATE OF role_id ON public.profiles
+  FOR EACH ROW
+  EXECUTE FUNCTION public.validate_role_id();
+
+COMMENT ON FUNCTION public.validate_role_id() IS 'Valida se role_id existe em roles ou default_roles antes de inserir/atualizar profiles';
+COMMENT ON TRIGGER validate_role_id_trigger ON public.profiles IS 'Garante que role_id referencie uma role válida em roles ou default_roles';
